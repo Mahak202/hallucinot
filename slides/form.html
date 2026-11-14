@@ -1,0 +1,46 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@page{size:A4;margin:16mm}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:11.5pt;color:#1b1b1f;line-height:1.45}
+h1{font-size:20pt;margin:0 0 4px}.sub{color:#6b6b76;margin:0 0 14px}
+h2{font-size:12pt;letter-spacing:1px;color:#5b3fd6;margin:18px 0 6px;border-bottom:1px solid #e4e2dc;padding-bottom:3px}
+.f{margin:8px 0}.l{font-weight:700;font-size:10pt;color:#6b6b76;text-transform:uppercase;letter-spacing:.5px}
+.v{background:#f6f5f2;border:1px solid #e4e2dc;border-radius:6px;padding:7px 10px;margin-top:3px;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:10pt}
+.n{color:#b7791f;font-size:10pt}
+</style></head><body>
+<h1>Drexathon submission: copy &amp; paste</h1>
+<p class="sub">Team Hallucinot · fill each field, then Save changes → Finalize before 3:00 PM</p>
+
+<h2>01 · TEAM DETAILS</h2>
+<div class="n">Already filled: Team- Hallucinot · mahak.gupta@sjsu.edu · Mahak Gupta · Harsh</div>
+
+<h2>02 · WHAT YOU BUILT</h2>
+<div class="f"><div class="l">Project name</div><div class="v">Hallucinot</div></div>
+<div class="f"><div class="l">Track (dropdown)</div><div class="v">Wildcard</div><div class="n">Matches slide 10 of the deck.</div></div>
+<div class="f"><div class="l">Brief explanation</div><div class="v">Hallucinot — for once, AI fixes human hallucinations. A team of Drex agents checks every sentence of a live meeting, a document or a chatbot answer against what your organization actually knows, and shows the receipt. Our wildcard proof: Hallucinot is judging the Drexathon itself.
+
+HOW IT WORKS
+• Live meeting: speech → a Drex router classifies each sentence → agents run in parallel, every call made by Drex: Fact checker, Suggest, Action items, Leak guard, Decision recorder, Policy guards auto-created from rules found in your own documents, and custom agents written in plain English. When two agents disagree, a third Drex call arbitrates (negotiation). Each transcript line is colored: verified / wrong / policy flag / changed today / answered / to-do.
+• Learns with no clicks: remembers decisions announced in the meeting, warns when a later statement contradicts them, learns from self-corrections.
+• Check any document: chatbot answers, emails, sales flyers, student posters (Adobe Express) — every claim gets checked, with Fix (correct sentence picked from the source) and Cite.
+• Judge mode: drop any submissions file (CSV/Excel/PDF/screenshot); Drex reviews each row, listens to each team's live demo, detects who is presenting, checks every claim against that team's own repo/slides, and scores all teams on the official rubric with a live big-screen board.
+
+HOW WE USED NACE
+• Drex: every decision — router, all agents, verdicts, fix selection, negotiation, team detection, rubric scoring (~0.3–0.6 s per decision).
+• NDI (Perception API): parses PDFs, images (OCR), Word, slides and submission files into the knowledge base; rules found in them become new agents.
+• Intern: meeting recap + action items handed to @Intern in Slack.
+• Partners: DeepInfra (Llama 3.3 70B) as the "System 2" writer, called only when Drex decides writing is needed; Adobe Express/Firefly for the deck, mascot and classroom poster.
+
+EVIDENCE
+• Drex vs Claude Opus 5.5 on 50 meeting lines over 300 real GitHub PRs: same accuracy (47/50), ~6× faster (0.38 s vs 2.2 s), ~500× cheaper.
+• Drex-routed vs LLM-on-every-sentence (12-line meeting): 58% fewer LLM calls, ~7× lower LLM cost; the LLM-only design missed the discount-policy break, the leaked API key and the action item.
+• End-to-end judging test: 15/16 checks passed. All tests are in the repo (eval/).</div></div>
+
+<h2>03 · PRESENTATION</h2>
+<div class="f"><div class="l">Presentation link</div><div class="v">(optional — Mahak's Adobe Express share link if she has one, otherwise leave empty)</div></div>
+<div class="f"><div class="l">Upload PDF or PPTX</div><div class="v">Hallucinot-final.pdf   (Mahak's 10 Adobe slides + slide 11: every tool we used)</div></div>
+<div class="f"><div class="l">Presentation comment</div><div class="v">Deck made in Adobe Express & Firefly. Live demo: open the demo link → Home → Live meeting, Check a document, or Judge the Drexathon. Demo data is fictional (Quokka Analytics, Bio 101) plus public GitHub repos.</div></div>
+
+<h2>04 · CODE &amp; DEMO</h2>
+<div class="f"><div class="l">Repository / code link</div><div class="v">https://github.com/harsh-neubird/hallucinot</div><div class="n">Public. For the exact submitted version you can use: https://github.com/harsh-neubird/hallucinot/tree/b95e9cd</div></div>
+<div class="f"><div class="l">Upload source ZIP</div><div class="v">(optional — skip)</div></div>
+<div class="f"><div class="l">Live demo link</div><div class="v">https://quench-humped-excluding.ngrok-free.dev</div><div class="n">Runs from Harsh's laptop: keep it on, awake and online.</div></div>
+</body></html>
