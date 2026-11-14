@@ -322,6 +322,12 @@ def split_claims(text):
 def check_sentence(sentence, ws):
     t0 = time.time()
     cands = search(sentence, ws=ws)
+    if ws.startswith("team:") and ws in INDEXES:
+        core = [c for c in INDEXES[ws]["chunks"] if any(k in (c["title"] + " " + c["source"]).lower()
+                for k in ("submission", "summary", "description"))][:3]
+        intro = [c for c in INDEXES[ws]["chunks"] if c["source"].lower().endswith("readme.md")][:2]
+        seen = {c["id"] for c in cands}
+        cands = cands[:10] + [c for c in core + intro if c["id"] not in seen]
     res = {"sentence": sentence, "status": "not_claim", "drex_ms": []}
     if not cands:
         res["status"] = "no_source"
@@ -1076,6 +1082,17 @@ def judge_analyze(text, override=None):
             out["switched"] = True
         JUDGE["current"] = override
     else:
+        low = text.lower()
+        def names(t):
+            n = [t["name"], re.sub(r"^team\s+", "", t["name"], flags=re.I)]
+            proj = (t.get("oneliner") or "").split(":")[0]
+            if 2 < len(proj) < 40:
+                n.append(proj)
+            return [x.lower() for x in n if len(x) > 3]
+        named = [t["slug"] for t in teams if any(re.search(r"\b" + re.escape(x) + r"\b", low) for x in names(t))]
+        if len(named) == 1 and named[0] != JUDGE["current"]:
+            JUDGE["current"] = named[0]; out["switched"] = True; out["team_guess"], out["team_conf"] = named[0], 1.0
+    if not override and not out["switched"]:
         crit = {t["slug"]: f"{t['name']}: {t['oneliner']}" for t in teams}
         crit["unclear"] = "Cannot tell which project this is about, or it is general talk"
         r = drex({"presenter_just_said": text, "current_team": JUDGE["current"] or "none yet"},
