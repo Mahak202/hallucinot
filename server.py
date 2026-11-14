@@ -565,7 +565,22 @@ def normalize_spoken(t):
                lambda m: num(m) + " ", t, flags=re.I)
     t = re.sub(r"\b(" + "|".join(k for k in NUMW if k != "oh") + r")\s+percent\b", lambda m: NUMW[m.group(1).lower()] + "%", t, flags=re.I)
     t = re.sub(r"(\d)\s+percent\b", r"\1%", t)
+    t = fix_glossary(t)
     return re.sub(r"\s{2,}", " ", t).strip()
+
+
+# Event product names speech engines don't know. Corrected only in "the model" contexts, so ordinary words survive
+# ("two tracks", "the Swarm track" are left alone).
+SOUNDALIKE = r"(?:tracks?|t-?rex|treks?|dreks?|drecks?|drax|drakes?|rex)"
+MODEL_BEFORE = r"(?:by|with|using|uses|use|used|from|of|called|via|run|runs|powered by|decided by)"
+MODEL_AFTER = r"(?:decides?|decided|makes?|made|matched|matches|scores?|scored|picks?|picked|is|was|does|did|answers?|returns?|model|api|calls?|router|agents?|decision)"
+
+
+def fix_glossary(t):
+    t = re.sub(r"\b(" + MODEL_BEFORE + r")\s+(?:the\s+)?" + SOUNDALIKE + r"\b", lambda m: m.group(1) + " Drex", t, flags=re.I)
+    t = re.sub(r"\b" + SOUNDALIKE + r"\s+(?=" + MODEL_AFTER + r"\b)", "Drex ", t, flags=re.I)
+    t = re.sub(r"\bnice\s+(?:dot\s+)?a\.?\s?i\b", "Nace AI", t, flags=re.I)
+    return t
 
 
 def pick_transcript(alternatives, ws):
@@ -1122,7 +1137,7 @@ def rank_teams():
 
 def judge_analyze(text, override=None):
     t0 = time.time()
-    text = re.sub(r"^[A-Z][a-z]{1,15}:\s*", "", text.strip())
+    text = normalize_spoken(re.sub(r"^[A-Z][a-z]{1,15}:\s*", "", text.strip()))
     teams = JUDGE["teams"]
     if not teams:
         raise RuntimeError("Import the teams first")
