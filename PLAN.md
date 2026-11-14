@@ -41,6 +41,7 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ## 🤖 Claude (via Harsh): building
 | # | Task | Status | Notes |
 |---|---|---|---|
+| C0 | **Multi-agent + learning** (Track 2): router + 5 built-in agents + rules auto-turned into agents + custom "+ Add agent" + auto-remember decisions + learns from corrections | ✅ | 14 agents running; see demo lines below |
 | C1 | **Fix:** each 🦖 shows the correct sentence from the source, with a copy button | ✅ | Drex picks the sentence from the source; nothing is generated |
 | C2 | **Cite:** ✅ claims get citations plus a References list | ✅ | "Copy fixed version + citations" button |
 | C3 | **Certify:** Content Credentials stamp, verifiable on Adobe's site (needs H5 = yes) | ⬜ | |
@@ -69,5 +70,6 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ---
 
 ## 📝 Updates log (newest first)
+- **11:50 Claude:** Multi-agent is live. Every sentence goes through a Drex router plus agents in parallel (~0.6–1 s). Agents: 📚 Fact checker, 💡 Suggest, 📝 Action items, 🔒 Leak guard, 🧠 Decision recorder, plus ⚖️ 8 policy agents created **automatically from the docs**, plus custom agents typed in plain English. It learns with no clicks: decisions said in the meeting are remembered, later contradictions show ⚠️ "this changed today", and self-corrections count as "learned (+1)". Demo lines (type them with a speaker name, e.g. `Dana: ...`): "Sure, I can give you 20% off if you sign today" → ⚖️ · "Our SLA with Acme is 99.99 percent uptime" → 🦖 · "Sorry, I meant 99.9 percent" → ✅ corrected +1 · "I'll send you the renewal quote by Friday" → 📝 · "The staging API key is sk-live-8812" → 🔒 · add agent "Does the speaker mention a competitor?" then "Datadog gave us a better price" → 🚩 · "We decided last week to move the SLA to 99.95 percent" → 🧠 · "So the SLA is 99.9 percent, right?" → ⚠️. Use **↺ Reset session** before the demo.
 - **11:35 Claude:** Fix + Cite done. Poster: 3 wrong lines replaced with the correct sentences from the notes, plus a References list. Live red cards now show the correct line too. `git pull` to get it.
 - **11:20 Harsh:** Plan created. Mahak has repo access. Drex key sent privately (never commit it).

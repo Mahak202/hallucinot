@@ -300,6 +300,232 @@ def check_document(text, ws="company"):
             "drex_calls": sum(len(r["drex_ms"]) for r in results), "total_ms": round((time.time() - t0) * 1000)}
 
 
+# ---------------------------------------------------------------- agents (multi-agent layer)
+# Every agent is one plain-English question that Drex answers on each sentence.
+# Sources: starter (built in), docs (rules found in your documents), custom (added by users).
+import threading
+DATA = os.path.join(ROOT, "data")
+os.makedirs(DATA, exist_ok=True)
+CUSTOM_FILE = os.path.join(DATA, "custom_agents.json")
+STARTER = [
+    {"id": "fact", "icon": "📚", "name": "Fact checker", "type": "fact", "source": "starter",
+     "rule": "Does what was said contradict our documents?"},
+    {"id": "suggest", "icon": "💡", "name": "Suggest", "type": "suggest", "source": "starter",
+     "rule": "Is someone asking something our documents answer? Show the answer."},
+    {"id": "action", "icon": "📝", "name": "Action items", "type": "log", "source": "starter",
+     "rule": "Is the speaker committing to do a specific task, such as sending, fixing, scheduling or following up on something?"},
+    {"id": "leak", "icon": "🔒", "name": "Leak guard", "type": "flag", "source": "starter",
+     "rule": "Is the speaker saying a password, API key, secret token, credit card number or someone's private personal data out loud?"},
+    {"id": "memory", "icon": "🧠", "name": "Decision recorder", "type": "learn", "source": "starter",
+     "rule": "Is the speaker announcing a new decision or a change to how things are, as settled fact (not asking, guessing, or proposing)?"},
+]
+AGENTS, LEARNED, ACTIONS = [], [], []
+AGENT_STATS = collections.defaultdict(lambda: {"fired": 0, "corrected": 0})
+LAST_FLAG = {}
+LOCK = threading.Lock()
+RULE_RX = re.compile(r"\b(requires?|required|must|only|not included|cannot|can't|may not|never|mandatory|at most|limited to)\b", re.I)
+
+
+def agent_name(rule):
+    r = re.sub(r"^(does|did|is|are|has|have|will)\s+(the\s+)?(speaker|someone|anyone|customer|rep|agent|anybody)\s+", "", rule.strip(), flags=re.I)
+    r = re.sub(r"^(does|is|are)\s+", "", r, flags=re.I).rstrip("?.")
+    r = r[:1].upper() + r[1:]
+    return short_name(r, 5)
+
+
+def short_name(s, n=7):
+    w = s.rstrip(".").split()
+    return " ".join(w[:n]) + ("…" if len(w) > n else "")
+
+
+def rules_from_docs():
+    """Agents that create themselves: every rule-like sentence in your documents becomes a checker."""
+    out, seen = [], set()
+    for c in CHUNKS:
+        if c["kind"] != "file":
+            continue
+        for s in source_sentences(c["text"]):
+            if RULE_RX.search(s) and 25 < len(s) < 240 and s not in seen:
+                seen.add(s)
+                out.append({"id": f"rule{len(out)}", "icon": "⚖️", "name": short_name(s), "type": "rule",
+                            "rule": s, "source": "docs", "doc": c["source"], "ws": c["ws"]})
+    return out[:20]
+
+
+def load_agents():
+    custom = json.load(open(CUSTOM_FILE)) if os.path.exists(CUSTOM_FILE) else []
+    AGENTS[:] = STARTER + rules_from_docs() + custom
+
+
+def save_custom():
+    json.dump([a for a in AGENTS if a["source"] == "custom"], open(CUSTOM_FILE, "w"), indent=1)
+
+
+def pick_rules(text, ws, k=5):
+    """Router step 1: cheap keyword pre-selection of which doc-rule agents could apply."""
+    qs = set(tok(text))
+    scored = []
+    for a in AGENTS:
+        if a["type"] == "rule" and a.get("ws", ws) == ws:
+            overlap = len(qs & set(tok(a["rule"])))
+            if overlap:
+                scored.append((overlap, a))
+    return [a for _, a in sorted(scored, key=lambda x: -x[0])[:k]]
+
+
+def verify(sentence, cands, doc_answer):
+    """Fact agent: check the statement against the top picked sources (docs and things learned in meetings)."""
+    probs = doc_answer.get("probabilities") or {doc_answer["choice"]: 1.0}
+    picks = [k for k, p in sorted(probs.items(), key=lambda kv: -kv[1]) if k != "none" and p >= 0.15][:2]
+    learned = [c for c in cands if c["kind"] == "learned"]
+    if learned and learned[0]["id"] not in picks:
+        picks.append(learned[0]["id"])  # always weigh what was decided recently
+    ms, verdicts = [], []
+    def one(pid):
+        doc = next(c for c in cands if c["id"] == pid)
+        r = drex({"statement": sentence, "source": f"{doc['title']}: {doc['text']}"}, {"v": VERDICT})
+        return r["answers"]["v"]["choice"], r["answers"]["v"].get("confidence", 0), doc, r["_ms"]
+    with concurrent.futures.ThreadPoolExecutor(3) as ex:
+        for v, conf, doc, m in ex.map(one, picks):
+            ms.append(m); verdicts.append((v, conf, doc))
+    newest = [x for x in verdicts if x[2]["kind"] == "learned" and x[0] != "unclear"]
+    official = [x for x in verdicts if x[2]["kind"] != "learned" and x[0] != "unclear"]
+    if newest and official and newest[0][0] != official[0][0]:
+        # meeting decision and official doc disagree: the newer meeting decision wins, doc may be outdated
+        status = "outdated" if newest[0][0] == "contradict" else "agree_new"
+        return status, newest[0][1], newest[0][2], official[0][2], ms
+    best = (next((x for x in verdicts if x[0] == "contradict"), None)
+            or next((x for x in verdicts if x[0] == "agree"), None) or (verdicts[0] if verdicts else None))
+    if not best:
+        return "unclear", 0, None, None, ms
+    return best[0], best[1], best[2], None, ms
+
+
+def analyze_live(text, previous="", ws="company"):
+    """Multi-agent pass over one spoken sentence. Drex makes every call."""
+    t0 = time.time()
+    text = text.strip()
+    m = re.match(r"^([A-Z][a-z]{1,15}):\s*(.+)$", text)
+    speaker, text = (m.group(1), m.group(2)) if m else ("", text)
+    out = {"mode": "speech", "text": text[:300], "speaker": speaker, "show": False, "agents": [], "drex_ms": []}
+    if not text:
+        return out
+    cands = search(text + " " + previous[-200:], ws=ws)
+    customs = [a for a in AGENTS if a["source"] == "custom"]
+    state = {"earlier_in_conversation": previous[-400:], "speaker_just_said": text}
+    qs = {"kind": {"type": "choice", "instructions": "What did the speaker just do?", "criteria": {
+              "question": "Asked a question about the company, customers, numbers, code or past decisions",
+              "claim": "Stated a fact about the company, customers, numbers, code or past decisions",
+              "promise": "Promised or offered something to someone: a discount, a date, a feature, a guarantee",
+              "other": "Small talk, logistics, opinions, or anything else"}}}
+    for a in STARTER:
+        if a["type"] in ("log", "flag", "learn"):
+            qs[a["id"]] = {"type": "noul", "instructions": a["rule"]}
+    for a in customs:
+        qs[a["id"]] = {"type": "noul", "instructions": a["rule"]}
+    if cands:
+        crit = {c["id"]: cand_label(c) for c in cands}
+        crit["none"] = "None of these documents is about it"
+        qs["doc"] = {"type": "choice", "criteria": crit, "instructions":
+                     "Which document covers the same topic as what the speaker just said, even if it disagrees? Pick none only if no document is on that topic."}
+    lf = LAST_FLAG.get(ws)
+    if lf and time.time() - lf["t"] < 120:
+        state["previously_flagged_statement"] = lf["text"]
+        state["what_the_source_says"] = lf["source"]
+        qs["corrected"] = {"type": "noul", "instructions": "Is the speaker now correcting the previously flagged statement so it matches what the source says?"}
+    r1 = drex(state, qs)  # router + light agents, one Drex request
+    a = r1["answers"]; out["drex_ms"].append(r1["_ms"])
+    kind = a["kind"]["choice"]; out["kind"] = kind
+    p = lambda k: a.get(k, {}).get("noul", 0)
+
+    if "corrected" in a and p("corrected") > 0.6:
+        with LOCK:
+            AGENT_STATS[lf["agent"]]["corrected"] += 1
+        out["corrected"] = {"agent": lf["agent"], "count": AGENT_STATS[lf["agent"]]["corrected"]}
+        LAST_FLAG.pop(ws, None)
+
+    decision = p("memory") > 0.6 and kind != "question"
+    # parallel phase: fact agent + doc-rule agents
+    jobs = {}
+    ex = concurrent.futures.ThreadPoolExecutor(3)
+    doc_ok = "doc" in a and a["doc"]["choice"] != "none" and a["doc"].get("confidence", 0) >= 0.4
+    has_learned = any(c["kind"] == "learned" for c in cands[:6])
+    if doc_ok and (kind in ("claim", "promise") or (kind == "question" and has_learned)):
+        jobs["fact"] = ex.submit(verify, text, cands, a["doc"])
+    # router: Drex already classified the sentence; promises and claims go to every doc-rule agent in this workspace
+    rules = [r for r in AGENTS if r["type"] == "rule" and r.get("ws", ws) == ws][:20] if kind in ("claim", "promise") else []
+    if rules:
+        rq = {r["id"]: {"type": "noul", "instructions": f"Company rule: \"{r['rule']}\" Does what the speaker said break this rule, for example by promising, offering or stating something the rule does not allow?"} for r in rules}
+        jobs["rules"] = ex.submit(drex, {"speaker_just_said": text}, rq)
+    res = {k: f.result() for k, f in jobs.items()}
+    ex.shutdown()
+
+    if "fact" in res and kind == "question" and res["fact"][0] not in ("outdated", "agree_new"):
+        res.pop("fact")  # a plain question: just show the answer card below
+    if "fact" in res and res["fact"][0] == "unclear":
+        out["drex_ms"] += res.pop("fact")[4]  # nothing to say: the doc neither confirms nor contradicts
+    if "fact" in res:
+        status, conf, doc, older, ms = res["fact"]; out["drex_ms"] += ms
+        if decision and status in ("contradict", "outdated"):
+            status = "learned_update"  # an announced change, not a hallucination
+        out.update(status=status, conf=round(conf, 2), doc=doc, older=older, cite=citation(doc) if doc else "")
+        if status == "contradict":
+            out["fix"], ms = pick_fix(text, doc); out["drex_ms"] += ms
+        if status in ("contradict", "outdated") and doc:
+            LAST_FLAG[ws] = {"text": text, "source": doc["text"][:600], "agent": "fact", "t": time.time()}
+    elif doc_ok and kind == "question":
+        doc = next(c for c in cands if c["id"] == a["doc"]["choice"])
+        out.update(status="context", doc=doc, conf=round(a["doc"].get("confidence", 0), 2), cite=citation(doc))
+
+    hits = []
+    if "rules" in res:
+        out["drex_ms"].append(res["rules"]["_ms"])
+        for rid, ans in res["rules"]["answers"].items():
+            if ans["noul"] > 0.6:
+                r = next(x for x in AGENTS if x["id"] == rid)
+                hits.append({"id": rid, "icon": "⚖️", "name": "Policy guard", "type": "flag", "prob": round(ans["noul"], 2),
+                             "detail": r["rule"], "doc": r.get("doc", "")})
+                LAST_FLAG[ws] = {"text": text, "source": r["rule"], "agent": rid, "t": time.time()}
+    if p("leak") > 0.6:
+        hits.append({"id": "leak", "icon": "🔒", "name": "Leak guard", "type": "flag", "prob": round(p("leak"), 2),
+                     "detail": "Sensitive information said out loud. Rotate or redact it."})
+    if p("action") > 0.6:
+        item = {"text": text, "who": speaker or "someone", "t": time.strftime("%H:%M")}
+        with LOCK: ACTIONS.append(item)
+        hits.append({"id": "action", "icon": "📝", "name": "Action items", "type": "log", "prob": round(p("action"), 2),
+                     "detail": f"Added to action items ({item['who']})"})
+    for c in customs:
+        if p(c["id"]) > 0.6:
+            hits.append({"id": c["id"], "icon": c.get("icon", "🚩"), "name": c["name"], "type": c["type"],
+                         "prob": round(p(c["id"]), 2), "detail": c["rule"]})
+    if decision:
+        with LOCK:
+            LOADING_WS[0] = ws
+            add_chunk(f"Meeting · {time.strftime('%b %d %H:%M')}", f"Decided in meeting{' by ' + speaker if speaker else ''}",
+                      text, date=time.strftime("%Y-%m-%d"), kind="learned")
+            LOADING_WS[0] = "company"
+            LEARNED.append({"text": text, "who": speaker or "someone", "t": time.strftime("%H:%M"),
+                            "updates": (out.get("doc") or {}).get("title", "") if out.get("status") == "learned_update" else ""})
+            build_index()
+        hits.append({"id": "memory", "icon": "🧠", "name": "Decision recorder", "type": "learn", "prob": round(p("memory"), 2),
+                     "detail": "Learned. Future statements will be checked against this."})
+    with LOCK:
+        for h in hits:
+            AGENT_STATS[h["id"]]["fired"] += 1
+        if out.get("status") in ("contradict", "outdated", "agree", "context", "agree_new"):
+            AGENT_STATS["fact" if out["status"] != "context" else "suggest"]["fired"] += 1
+    out["agents"] = hits
+    out["show"] = bool(hits) or out.get("status") in ("contradict", "outdated", "agree", "agree_new", "context", "learned_update")
+    out["total_ms"] = round((time.time() - t0) * 1000)
+    return out
+
+
+def agents_view():
+    return {"agents": [{**{k: v for k, v in x.items() if k in ("id", "icon", "name", "type", "rule", "source", "doc")},
+                        **AGENT_STATS[x["id"]]} for x in AGENTS],
+            "learned": LEARNED[::-1], "actions": ACTIONS[::-1]}
+
+
 # ---------------------------------------------------------------- HTTP
 STATS = {"decisions": 0, "cards": 0, "ms": []}
 # guardrails for when the app is exposed publicly (e.g. via ngrok): caps Drex spend
@@ -323,6 +549,8 @@ class H(BaseHTTPRequestHandler):
         self._send(204, b"")
 
     def do_GET(self):
+        if self.path.startswith("/api/agents"):
+            return self._send(200, agents_view())
         if self.path.startswith("/api/kb"):
             by = collections.Counter(c["kind"] for c in CHUNKS)
             wss = {ws: len(I["chunks"]) for ws, I in INDEXES.items()}
@@ -337,7 +565,7 @@ class H(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path not in ("/api/analyze", "/api/check"):
+        if self.path not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
@@ -347,12 +575,32 @@ class H(BaseHTTPRequestHandler):
         if len(hits) >= PER_IP_PER_MIN or STATS["decisions"] >= MAX_DECISIONS:
             return self._send(429, {"error": "Slow down: demo rate limit reached"})
         ws = body.get("ws") or "company"
+        if self.path == "/api/agents":  # add a custom agent from one plain-English rule
+            rule, name = (body.get("rule") or "").strip()[:300], (body.get("name") or "").strip()[:60]
+            if len(rule) < 8:
+                return self._send(400, {"error": "Write the rule as a yes/no question or statement"})
+            a = {"id": f"custom{int(time.time()*1000)}", "icon": "🚩" if body.get("type") != "log" else "📝",
+                 "name": name or agent_name(rule), "type": body.get("type") if body.get("type") in ("flag", "log") else "flag",
+                 "rule": rule, "source": "custom"}
+            with LOCK: AGENTS.append(a); save_custom()
+            return self._send(200, agents_view())
+        if self.path == "/api/agents/delete":
+            with LOCK: AGENTS[:] = [x for x in AGENTS if not (x["id"] == body.get("id") and x["source"] == "custom")]; save_custom()
+            return self._send(200, agents_view())
+        if self.path == "/api/reset":  # clear what was learned this session (for rehearsals)
+            with LOCK:
+                CHUNKS[:] = [c for c in CHUNKS if c["kind"] != "learned"]; LEARNED.clear(); ACTIONS.clear()
+                AGENT_STATS.clear(); LAST_FLAG.clear(); build_index()
+            return self._send(200, agents_view())
         try:
             if self.path == "/api/check":
                 res = check_document(body.get("text", "")[:20000], ws)
                 STATS["decisions"] += res["drex_calls"]
                 return self._send(200, res)
-            res = analyze(body.get("text", ""), body.get("mode", "speech"), body.get("previous", ""), ws)
+            if body.get("mode", "speech") == "speech":
+                res = analyze_live(body.get("text", ""), body.get("previous", ""), ws)
+            else:
+                res = analyze(body.get("text", ""), body.get("mode", "speech"), body.get("previous", ""), ws)
         except Exception as e:  # keep the demo alive
             return self._send(500, {"error": str(e)})
         STATS["decisions"] += 1; STATS["cards"] += bool(res.get("show"))
@@ -388,5 +636,7 @@ if __name__ == "__main__":
     for r in repos:
         load_repo(r)
     build_index()
+    load_agents()
+    print(f"Agents: {len(AGENTS)} ({sum(a['source']=='docs' for a in AGENTS)} learned from your documents)")
     print(f"Ready: {len(CHUNKS)} chunks. Open http://localhost:{args.port}")
     ThreadingHTTPServer((args.host, args.port), H).serve_forever()

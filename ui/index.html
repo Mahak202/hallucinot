@@ -91,6 +91,39 @@ textarea{width:100%;min-height:150px;border:0;outline:0;resize:vertical;backgrou
 .claim.contradict .s{text-decoration:line-through;text-decoration-color:var(--red)}
 .claim details{font-size:13px;margin-top:4px}
 .claim summary{cursor:pointer;color:var(--muted)}
+.wrap{max-width:1180px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+@media (max-width:900px){.cols{grid-template-columns:1fr}}
+.panel{position:sticky;top:12px;display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.bh{font-weight:700;font-size:14px;margin-bottom:6px}
+.ag{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--line);font-size:13px}
+.ag:first-child{border-top:0}
+.ag .nm{font-weight:600}.ag .rl{color:var(--muted);font-size:12px;line-height:1.35}
+.ag .ct{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap;text-align:right}
+.ag.hot{animation:flash 1.2s}
+@keyframes flash{0%{background:var(--amber-bg)}100%{background:transparent}}
+.srcb{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:4px;padding:1px 5px;margin-left:4px}
+.srcb.starter{background:var(--grey-bg);color:var(--muted)}.srcb.docs{background:var(--blue-bg);color:var(--blue)}.srcb.custom{background:var(--amber-bg);color:var(--amber)}
+.ag .del{border:0;background:none;color:var(--muted);cursor:pointer;font-size:12px}
+.aghead{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:8px 0 2px}
+#addagent{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+#addagent input{font-size:13px;padding:8px 10px}
+#addagent .row{display:flex;gap:6px}
+#addagent select{font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);padding:4px 6px}
+.lst div{font-size:13px;padding:4px 0;border-top:1px solid var(--line)}.lst div:first-child{border-top:0}
+.hits{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.hit{font-size:13px;border-radius:8px;padding:5px 8px;background:var(--grey-bg)}
+.hit.flag{background:var(--red-bg)}.hit.log{background:var(--blue-bg)}.hit.learn{background:var(--green-bg)}
+.hit b{margin-right:4px}
+.card.outdated{border-left-color:var(--amber);background:linear-gradient(0deg,var(--panel),var(--amber-bg))}
+.outdated .badge{color:var(--amber)}
+.card.learned{border-left-color:var(--green)}
+.learned .badge{color:var(--green)}
+.card.flagonly{border-left-color:var(--red)}
+.flagonly .badge{color:var(--red)}
+.card.logonly{border-left-color:var(--blue)}
+.corr{font-size:12px;color:var(--green);margin-top:6px;font-weight:600}
 .fix{margin:6px 0 2px;font-size:14px;background:var(--green-bg);border-radius:8px;padding:6px 8px}
 .fix b{color:var(--green)}
 .cite{font-size:12px;color:var(--muted);margin-top:2px}
@@ -118,15 +151,29 @@ button.mic.small{padding:6px 12px;font-size:13px;margin-left:auto}
     <label class="ws">Knowledge: <select id="ws"><option value="company">🏢 Company</option><option value="classroom">🎓 Classroom</option></select></label>
   </div>
 
-  <section id="tab-live">
+  <section id="tab-live" class="cols"><div class="main">
   <div class="controls">
     <button class="mic" id="mic">🎙️ Start listening</button>
     <form id="f"><input type="text" id="t" placeholder="…or type what someone says, then Enter" autocomplete="off"><button class="mic" style="background:var(--ink)">Check</button></form>
   </div>
   <div class="live" id="live"></div>
   <div class="feed" id="feed">
-    <div class="empty" id="empty">Talk or type. Try <code>Why did churn go up in Q3?</code>, <code>Our SLA with Acme is 99.99% uptime</code>, <code>We switched redirects to 301</code>, or <code>let's grab lunch</code>.</div>
+    <div class="empty" id="empty">Talk or type. Start a line with a name to set the speaker, e.g. <code>Dana: I can give you 20% off</code>. Try <code>Why did churn go up in Q3?</code>, <code>Our SLA with Acme is 99.99% uptime</code>, <code>I'll send the quote by Friday</code>, or <code>let's grab lunch</code>.</div>
   </div>
+  </div>
+  <aside class="panel">
+    <div class="box">
+      <div class="bh">🤖 Agents <span class="sumtxt" id="agcount"></span></div>
+      <div id="agents"></div>
+      <form id="addagent">
+        <input type="text" id="arule" placeholder="+ New agent, in plain English: e.g. Does the speaker mention a competitor?" autocomplete="off">
+        <div class="row"><select id="atype"><option value="flag">🚩 Flag it</option><option value="log">📝 Log it</option></select><button class="mic small">Add agent</button></div>
+      </form>
+    </div>
+    <div class="box"><div class="bh">📝 Action items</div><div id="actions" class="lst"><span class="sumtxt">Promises and to-dos land here automatically.</span></div></div>
+    <div class="box"><div class="bh">🧠 Learned today</div><div id="learned" class="lst"><span class="sumtxt">Decisions announced in the meeting are remembered automatically.</span></div></div>
+    <a href="#" id="reset" class="sumtxt">↺ Reset session</a>
+  </aside>
   </section>
 
   <section id="tab-doc" hidden>
@@ -184,29 +231,68 @@ function render(r){
   if(!r.show){
     const q=document.createElement('div');q.className='quiet';
     q.textContent=`🤫 stayed quiet — “${(r.text||'').slice(0,80)}” (${r.kind||'no match'}, ${r.total_ms||'?'} ms)`;
-    add(q); updStats(); return;
+    if(r.corrected) q.textContent=`✅ ${r.speaker||'Speaker'} corrected it — Fact checker learned (+${r.corrected.count})`;
+    add(q); updStats(); refreshPanel(); return;
   }
   S.cards++;
-  const d=r.doc, v=r.verdict;
-  let cls='answer', badge='📄 Context';
-  if(r.kind==='page'){cls='page';badge='📎 From your knowledge base'}
-  if(v==='agree'){cls='agree';badge='✅ Checks out'}
-  if(v==='unclear'){cls='unclear';badge='🟡 Related — source doesn’t confirm'}
-  if(v==='contradict'){cls='contradict';badge='<span class="dino">🦖</span> Human hallucination detected'}
+  const d=r.doc, st=r.status || (r.verdict ? r.verdict : (r.kind==='page'?'page':'context'));
+  const who = r.speaker ? `${esc(r.speaker)} said` : (r.kind==='question'?'Asked':'You said');
+  let cls='answer', badge='📄 Context', srcLbl='Source';
+  if(st==='page'){cls='page';badge='📎 From your knowledge base'}
+  if(st==='agree'){cls='agree';badge='✅ Checks out'}
+  if(st==='agree_new'){cls='agree';badge='✅ Matches what was decided today';srcLbl='Decided in this meeting'}
+  if(st==='unclear'){cls='unclear';badge='🟡 Related — source doesn’t confirm'}
+  if(st==='contradict'){cls='contradict';badge='<span class="dino">🦖</span> Human hallucination detected';srcLbl='Source actually says'}
+  if(st==='outdated'){cls='outdated';badge='⚠️ Heads up — this changed today';srcLbl='Decided in this meeting'}
+  if(st==='learned_update'){cls='learned';badge='🧠 New decision — doc is now outdated';srcLbl='Older doc said'}
+  const hits=r.agents||[];
+  if(!d && hits.length){ const f=hits.find(h=>h.type==='flag'); cls=f?'flagonly':(hits[0].type==='learn'?'learned':'logonly'); badge=f?`🚩 ${esc(f.name)}`:`${hits[0].icon} ${esc(hits[0].name)}`; }
   const ms=(r.drex_ms||[]).reduce((a,b)=>a+b,0);
-  const conf = v ? r.verdict_conf : r.doc_conf;
+  const conf = r.verdict_conf ?? r.conf ?? r.doc_conf;
   const el=document.createElement('div');el.className='card '+cls;
   el.innerHTML=`
-    <div class="head"><span class="badge">${badge}</span><span class="meta">Drex ${ms} ms · ${Math.round((conf||0)*100)}% sure</span></div>
-    ${r.kind!=='page'?`<div class="said"><span class="lbl">${r.kind==='question'?'Asked':'You said'}</span><q>${esc(r.text)}</q></div>`:''}
+    <div class="head"><span class="badge">${badge}</span><span class="meta">${hits.length+(d?1:0)} agent${hits.length+(d?1:0)==1?'':'s'} · Drex ${ms} ms${conf?` · ${Math.round(conf*100)}% sure`:''}</span></div>
+    ${r.kind!=='page'?`<div class="said"><span class="lbl">${who}</span><q>${esc(r.text)}</q></div>`:''}
     ${r.fix?`<div class="fix">✏️ <b>Correct:</b> ${esc(r.fix)}</div>`:''}
-    <div class="src"><span class="lbl">${v==='contradict'?'Source actually says':'Source'}</span>
+    ${d?`<div class="src"><span class="lbl">${srcLbl}</span>
       <div class="title">${esc(d.title)}${d.date?` · ${esc(d.date)}`:''}</div>
       <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), r.text)}</div>
-      ${d.url?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>`:''}
-    </div>`;
-  add(el); updStats();
+      ${r.older?`<div class="sumtxt" style="margin-top:4px">⚠️ Older doc may be outdated: <b>${esc(r.older.title)}</b> — “${esc(r.older.text.slice(0,140))}…”</div>`:''}
+      ${d.url&&d.url.startsWith('http')?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>`:`<span class="sumtxt">${esc(d.source)}</span>`}
+    </div>`:''}
+    ${hits.length?`<div class="hits">${hits.map(h=>`<div class="hit ${h.type}"><b>${h.icon} ${esc(h.name)}</b>${esc(h.detail||'')}${h.doc?` <span class="sumtxt">(${esc(h.doc)})</span>`:''}</div>`).join('')}</div>`:''}
+    ${r.corrected?`<div class="corr">✅ Corrected — Fact checker learned (+${r.corrected.count})</div>`:''}`;
+  add(el); updStats(); refreshPanel(hits.map(h=>h.id).concat(d&&st!=='context'?['fact']:d?['suggest']:[]));
 }
+
+// ---- agents panel
+async function refreshPanel(fired=[]){
+  let v; try{ v = await fetch(API+'/api/agents').then(r=>r.json()); }catch(_){ return; }
+  const groups=[['starter','Built in'],['docs','Learned from your documents'],['custom','Yours']];
+  document.getElementById('agcount').textContent = `${v.agents.length} running`;
+  document.getElementById('agents').innerHTML = groups.map(([src,label])=>{
+    const list=v.agents.filter(a=>a.source===src); if(!list.length) return '';
+    return `<div class="aghead">${label} (${list.length})</div>` + list.map(a=>`
+      <div class="ag ${fired.includes(a.id)?'hot':''}"><span>${a.icon}</span>
+        <div><div class="nm">${esc(src==='docs'?'Policy: '+a.name:a.name)}<span class="srcb ${src}">${src==='docs'?'auto':src}</span></div>
+        <div class="rl">${esc(a.rule)}</div></div>
+        <div class="ct">${a.fired?`fired ${a.fired}`:''}${a.corrected?`<br>✓ ${a.corrected} fixed`:''}
+        ${src==='custom'?`<button class="del" data-del="${a.id}" title="Remove">✕</button>`:''}</div></div>`).join('');
+  }).join('');
+  const L=(arr,f,empty)=>arr.length?arr.map(f).join(''):`<span class="sumtxt">${empty}</span>`;
+  document.getElementById('actions').innerHTML = L(v.actions, x=>`<div>☐ <b>${esc(x.who)}</b>: ${esc(x.text)} <span class="sumtxt">${x.t}</span></div>`, 'Promises and to-dos land here automatically.');
+  document.getElementById('learned').innerHTML = L(v.learned, x=>`<div>🧠 ${esc(x.text)} <span class="sumtxt">— ${esc(x.who)}, ${x.t}</span></div>`, 'Decisions announced in the meeting are remembered automatically.');
+}
+document.getElementById('addagent').addEventListener('submit', async e=>{
+  e.preventDefault(); const rule=document.getElementById('arule').value.trim(); if(!rule) return;
+  await fetch(API+'/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rule,type:document.getElementById('atype').value})});
+  document.getElementById('arule').value=''; refreshPanel();
+});
+document.addEventListener('click', async e=>{ const b=e.target.closest('[data-del]'); if(!b) return;
+  await fetch(API+'/api/agents/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.del})}); refreshPanel(); });
+document.getElementById('reset').addEventListener('click', async e=>{ e.preventDefault();
+  await fetch(API+'/api/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); feed.innerHTML=''; history=[]; refreshPanel(); });
+refreshPanel();
 
 async function analyze(text, mode='speech'){
   text=text.trim(); if(!text) return;
