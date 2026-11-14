@@ -421,7 +421,8 @@ async function analyze(text, mode='speech', alternatives=[]){
     refreshLlm();
     if(r.error) throw new Error(r.error);
     render(r);
-  }catch(e){const q=document.createElement('div');q.className='quiet warn';q.textContent='⚠️ '+e.message+' — try again in a moment.';add(q);}
+  }catch(e){const q=document.createElement('div');q.className='quiet warn';
+    q.textContent='⚠️ '+(/Unexpected token|not valid JSON|Failed to fetch/.test(e.message)?'The server was briefly unavailable — say it again.':e.message+' — try again in a moment.');add(q);}
   if(mode==='speech') history.push(text);
 }
 
