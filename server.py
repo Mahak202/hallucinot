@@ -340,7 +340,7 @@ def check_sentence(sentence, ws):
         return res
     # a sentence can make several claims that live in different docs: check the top 2 picks
     probs = a["doc"].get("probabilities") or {a["doc"]["choice"]: 1.0}
-    picks = [k for k, p in sorted(probs.items(), key=lambda kv: -kv[1]) if k != "none" and p >= 0.2][:2] or [a["doc"]["choice"]]
+    picks = [k for k, p in sorted(probs.items(), key=lambda kv: -kv[1]) if k != "none" and p >= 0.1][:3] or [a["doc"]["choice"]]
     verdicts = []
     for pid in picks:
         doc = next(c for c in cands if c["id"] == pid)
@@ -499,8 +499,8 @@ def analyze_live(text, previous="", ws="company"):
     customs = [a for a in AGENTS if a["source"] == "custom"]
     state = {"earlier_in_conversation": previous[-400:], "speaker_just_said": text}
     qs = {"kind": {"type": "choice", "instructions": "What did the speaker just do?", "criteria": {
-              "question": "Asked a question about the company, customers, numbers, code or past decisions",
-              "claim": "Stated a fact about the company, customers, numbers, code or past decisions",
+              "question": "Asked a factual question about the subject being discussed (the business, a course topic, customers, numbers, code or past decisions)",
+              "claim": "Stated something as a fact about the subject being discussed (the business, a course topic, customers, numbers, code or past decisions)",
               "promise": "Promised or offered something to someone: a discount, a date, a feature, a guarantee",
               "other": "Small talk, logistics, opinions, or anything else"}}}
     for a in STARTER:
