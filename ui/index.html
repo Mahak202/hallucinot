@@ -91,6 +91,12 @@ textarea{width:100%;min-height:150px;border:0;outline:0;resize:vertical;backgrou
 .claim.contradict .s{text-decoration:line-through;text-decoration-color:var(--red)}
 .claim details{font-size:13px;margin-top:4px}
 .claim summary{cursor:pointer;color:var(--muted)}
+.fix{margin:6px 0 2px;font-size:14px;background:var(--green-bg);border-radius:8px;padding:6px 8px}
+.fix b{color:var(--green)}
+.cite{font-size:12px;color:var(--muted);margin-top:2px}
+button.copy{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;font-size:11px;padding:2px 7px;cursor:pointer;margin-left:4px}
+button.mic.small{padding:6px 12px;font-size:13px;margin-left:auto}
+#fixedout{white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0 0 10px}
 @media (max-width:480px){.ws{margin-left:0}.samples{margin-left:0}.stats{margin-left:0;width:100%}h1{font-size:21px}}
 </style>
 </head>
@@ -133,6 +139,7 @@ textarea{width:100%;min-height:150px;border:0;outline:0;resize:vertical;backgrou
       </div>
     </div>
     <div id="docsum"></div>
+    <pre id="fixedout" hidden></pre>
     <div class="feed" id="docres"></div>
   </section>
   <footer>Knowledge: local files + GitHub PRs · Search: keyword · Every decision (speak? which doc? agree/contradict?) by Drex.</footer>
@@ -192,6 +199,7 @@ function render(r){
   el.innerHTML=`
     <div class="head"><span class="badge">${badge}</span><span class="meta">Drex ${ms} ms · ${Math.round((conf||0)*100)}% sure</span></div>
     ${r.kind!=='page'?`<div class="said"><span class="lbl">${r.kind==='question'?'Asked':'You said'}</span><q>${esc(r.text)}</q></div>`:''}
+    ${r.fix?`<div class="fix">✏️ <b>Correct:</b> ${esc(r.fix)}</div>`:''}
     <div class="src"><span class="lbl">${v==='contradict'?'Source actually says':'Source'}</span>
       <div class="title">${esc(d.title)}${d.date?` · ${esc(d.date)}`:''}</div>
       <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), r.text)}</div>
@@ -255,13 +263,17 @@ async function checkDoc(){
     const c = r.counts || {};
     sum.innerHTML = `<span class="chip r">🦖 ${c.contradict||0} hallucination${(c.contradict||0)==1?'':'s'}</span>
       <span class="chip g">✅ ${c.agree||0} checked out</span><span class="chip y">🟡 ${c.no_source||0} no source</span>
-      <span class="sumtxt">${r.sentences} sentences · ${r.drex_calls} Drex decisions · ${(r.total_ms/1000).toFixed(1)} s</span>`;
+      <span class="sumtxt">${r.sentences} sentences · ${r.drex_calls} Drex decisions · ${(r.total_ms/1000).toFixed(1)} s</span>
+      <button class="mic small" id="fixall">✏️ Copy fixed version + citations</button>`;
+    document.getElementById('fixall').onclick = e => copyText(fixedVersion(r.results), e.target);
     const order = {contradict:0, no_source:1, agree:2, not_claim:3};
     r.results.map((x,i)=>({...x,i})).sort((a,b)=>order[a.status]-order[b.status] || a.i-b.i).forEach(x => {
       const el = document.createElement('div'); el.className = 'claim ' + x.status;
       const d = x.doc;
       el.innerHTML = `<div class="st">${LABEL[x.status]}${x.conf?` <span class="meta">${Math.round(x.conf*100)}% sure</span>`:''}</div>
         <div class="s">${esc(x.sentence)}</div>
+        ${x.fix ? `<div class="fix">✏️ <b>Fix:</b> <span>${esc(x.fix)}</span> <button class="copy" data-copy="${esc(x.fix)}">Copy</button></div>` : ''}
+        ${x.cite && x.status==='agree' ? `<div class="cite">📚 ${esc(x.cite)}</div>` : ''}
         ${d ? `<details ${x.status==='contradict'?'open':''}><summary>${x.status==='contradict'?'Source actually says':'Source'}: ${esc(d.title)}</summary>
           <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), x.sentence)}</div>
           ${d.url && d.url.startsWith('http') ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>` : `<span class="sumtxt">${esc(d.source)}</span>`}</details>` : ''}`;
@@ -272,6 +284,25 @@ async function checkDoc(){
   btn.disabled = false; btn.textContent = '🦖 Check every claim';
 }
 document.getElementById('docgo').addEventListener('click', checkDoc);
+
+// Fix + Cite: rebuild the text with corrections and numbered citations
+function fixedVersion(results){
+  const refs = [], refNo = c => { let i = refs.indexOf(c); if (i < 0) { refs.push(c); i = refs.length - 1; } return i + 1; };
+  const lines = results.map(x => {
+    if (x.status === 'contradict' && x.fix) return `${x.fix} [${refNo(x.cite)}]`;
+    if (x.status === 'agree' && x.cite) return `${x.sentence} [${refNo(x.cite)}]`;
+    if (x.status === 'no_source') return `${x.sentence} [citation needed]`;
+    return x.sentence;
+  });
+  return lines.join('\n') + (refs.length ? '\n\nReferences\n' + refs.map((c, i) => `[${i + 1}] ${c}`).join('\n') : '');
+}
+async function copyText(text, btn){
+  try { await navigator.clipboard.writeText(text); } catch(_) {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  if (btn) { const o = btn.textContent; btn.textContent = '✓ Copied'; setTimeout(() => btn.textContent = o, 1500); }
+  const out = document.getElementById('fixedout'); if (out && btn && btn.id === 'fixall') { out.hidden = false; out.textContent = text; }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if (b) copyText(b.dataset.copy, b); });
 
 // PDF / text files (e.g. exported from Adobe Express or Acrobat)
 async function loadPdfJs(){

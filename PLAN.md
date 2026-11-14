@@ -41,8 +41,8 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ## 🤖 Claude (via Harsh): building
 | # | Task | Status | Notes |
 |---|---|---|---|
-| C1 | **Fix:** each 🦖 shows the correct sentence from the source, with a copy button | ⬜ | |
-| C2 | **Cite:** ✅ claims get citations plus a References list | ⬜ | |
+| C1 | **Fix:** each 🦖 shows the correct sentence from the source, with a copy button | ✅ | Drex picks the sentence from the source; nothing is generated |
+| C2 | **Cite:** ✅ claims get citations plus a References list | ✅ | "Copy fixed version + citations" button |
 | C3 | **Certify:** Content Credentials stamp, verifiable on Adobe's site (needs H5 = yes) | ⬜ | |
 | C4 | Wire the T-Rex images into the cards (needs M4) | ⬜ | |
 | C5 | Plug in NDI for PDFs (needs H2) | ⬜ | |
@@ -69,4 +69,5 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ---
 
 ## 📝 Updates log (newest first)
+- **11:35 Claude:** Fix + Cite done. Poster: 3 wrong lines replaced with the correct sentences from the notes, plus a References list. Live red cards now show the correct line too. `git pull` to get it.
 - **11:20 Harsh:** Plan created. Mahak has repo access. Drex key sent privately (never commit it).

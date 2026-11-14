@@ -205,10 +205,37 @@ def analyze(text, mode="speech", previous="", ws="company"):
         v = r2["answers"]["v"]
         out["verdict"], out["verdict_conf"] = v["choice"], round(v.get("confidence", 0), 2)
         out["drex_ms"].append(r2["_ms"]); out["drex_eval_ms"].append(r2.get("evaluation_time_ms"))
+        if v["choice"] == "contradict" and mode == "speech":
+            out["fix"], ms = pick_fix(text, doc); out["drex_ms"] += ms
+        out["cite"] = citation(doc)
         if mode == "page" and v["choice"] != "contradict":
             out["verdict"] = None  # on pages, only speak up for contradictions; otherwise just show context
     out["total_ms"] = round((time.time() - t0) * 1000)
     return out
+
+
+def source_sentences(text):
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", re.sub(r"#+\s*", "", text)) if len(s.strip()) > 15][:15]
+
+
+def pick_fix(statement, doc):
+    """For a wrong statement, let Drex pick the source sentence that states the correct fact (no text is generated)."""
+    if doc.get("kind") == "pr":  # a PR's title is its cleanest statement of fact
+        return re.sub(r"^PR #\d+:\s*", "", doc["title"]) + f" (PR #{doc['source'].split('#')[-1]})", []
+    sents = source_sentences(doc["text"])
+    if not sents:
+        return None, []
+    crit = {f"s{i}": s[:300] for i, s in enumerate(sents)}
+    r = drex({"wrong_statement": statement, "source": doc["text"][:1500]},
+             {"fix": {"type": "choice", "criteria": crit,
+                      "instructions": "Which sentence from the source gives the correct information about the same thing the wrong statement got wrong?"}})
+    a = r["answers"]["fix"]
+    return sents[int(a["choice"][1:])], [r["_ms"]]
+
+
+def citation(doc):
+    title = re.sub(r"\s*\((fictional demo data|demo course notes)\)", "", doc["title"])
+    return title + (f" ({doc['date']})" if doc.get("date") else "")
 
 
 def split_claims(text):
@@ -256,7 +283,10 @@ def check_sentence(sentence, ws):
     best = (next((x for x in verdicts if x[0] == "contradict"), None)
             or next((x for x in verdicts if x[0] == "agree"), None) or verdicts[0])
     res.update(status={"agree": "agree", "contradict": "contradict"}.get(best[0], "no_source"),
-               conf=round(best[1], 2), doc=best[2], ms=round((time.time() - t0) * 1000))
+               conf=round(best[1], 2), doc=best[2], cite=citation(best[2]))
+    if res["status"] == "contradict":
+        res["fix"], ms = pick_fix(sentence, best[2]); res["drex_ms"] += ms
+    res["ms"] = round((time.time() - t0) * 1000)
     return res
 
 
