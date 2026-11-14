@@ -4,6 +4,26 @@
 
 Hallucinot listens to what you say (or reads the tab you're on), finds the relevant piece of your knowledge base, and shows it. When you say something that contradicts the source, it says so in red with the receipt. Every decision is made by **Drex**: should we speak, which document, and does it agree or contradict.
 
+**Built with Nace:**
+- **Drex** makes every decision: the router, each agent, the verdict, which fix to show, and the negotiation between agents.
+- **NDI** (Perception API) parses uploaded PDFs, images (OCR), Word and slides into the knowledge base, and the rules it finds become new agents.
+- **Intern** gets the meeting recap and action items in Slack for follow-up.
+
+**Partners:**
+- **Adobe Express / Firefly:** classroom posters, slides.
+- **DeepInfra:** "System 2" writer for the recap.
+
+| Feature | Where |
+|---|---|
+| 🎙️ Live meeting: agents check every sentence, learn decisions, negotiate | Live tab |
+| 📄 Check any document claim by claim, with **Fix** and **Cite** | Check a document tab |
+| ➕ Add knowledge (PDF, image, Word, slides via NDI); its rules become agents | "What I know" box |
+| 📋 Meeting recap → Slack → **@Intern** follows up on action items | "After the meeting" box |
+| 🧩 Chrome extension: check the tab you're on | `extension/` |
+| 🛟 Replay insurance: real answers recorded and replayed (labeled) if the API is down | automatic |
+
+Optional keys (files are git-ignored, or set them as env vars): `.nace_key` / `NACE_API_KEY` (required), `.deepinfra_key` / `DEEPINFRA_API_KEY`, `.slack_webhook` / `SLACK_WEBHOOK_URL`.
+
 ## Run it
 
 ```bash
