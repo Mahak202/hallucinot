@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hallucinot</title>
+<style>
+:root{
+  --bg:#f6f5f2;--panel:#ffffff;--ink:#1b1b1f;--muted:#6b6b76;--line:#e4e2dc;
+  --blue:#2b6cdf;--blue-bg:#eaf1fd;--green:#1f8a4c;--green-bg:#e7f6ed;
+  --red:#d03131;--red-bg:#fdeaea;--amber:#b7791f;--amber-bg:#fdf3e1;--grey-bg:#f1f0ec;
+  --accent:#5b3fd6;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121216;--panel:#1b1b21;--ink:#ececf1;--muted:#9a9aa6;--line:#2c2c35;
+  --blue:#7aa7ff;--blue-bg:#1a2540;--green:#5fd18f;--green-bg:#15301f;
+  --red:#ff7676;--red-bg:#3a1717;--amber:#f2b55a;--amber-bg:#352712;--grey-bg:#23232a;--accent:#a28cff;}}
+:root[data-theme="dark"]{
+  --bg:#121216;--panel:#1b1b21;--ink:#ececf1;--muted:#9a9aa6;--line:#2c2c35;
+  --blue:#7aa7ff;--blue-bg:#1a2540;--green:#5fd18f;--green-bg:#15301f;
+  --red:#ff7676;--red-bg:#3a1717;--amber:#f2b55a;--amber-bg:#352712;--grey-bg:#23232a;--accent:#a28cff;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.logo{font-size:30px}
+h1{margin:0;font-size:24px;letter-spacing:-.02em}
+.tag{color:var(--muted);font-size:13px;margin-top:2px}
+.stats{margin-left:auto;display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.stats b{color:var(--ink);font-variant-numeric:tabular-nums}
+.controls{margin:16px 0 10px;display:flex;gap:8px;flex-wrap:wrap}
+button.mic{border:0;border-radius:999px;padding:10px 18px;font-weight:600;font-size:15px;cursor:pointer;background:var(--accent);color:#fff}
+button.mic.on{background:var(--red);animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(208,49,49,.45)}50%{box-shadow:0 0 0 8px rgba(208,49,49,0)}}
+form{flex:1;display:flex;gap:8px;min-width:220px}
+input[type=text]{flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:15px}
+.live{min-height:24px;color:var(--muted);font-style:italic;font-size:14px;margin:4px 2px 12px}
+.feed{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--blue);border-radius:12px;padding:12px 14px;animation:in .25s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.card.answer{border-left-color:var(--blue)}
+.card.agree{border-left-color:var(--green);background:linear-gradient(0deg,var(--panel),var(--green-bg))}
+.card.contradict{border-left-color:var(--red);background:linear-gradient(0deg,var(--panel),var(--red-bg))}
+.card.unclear{border-left-color:var(--amber)}
+.card.page{border-left-color:var(--accent)}
+.head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.badge{font-weight:700;font-size:13px;letter-spacing:.02em}
+.answer .badge{color:var(--blue)}.agree .badge{color:var(--green)}.contradict .badge{color:var(--red)}.unclear .badge{color:var(--amber)}.page .badge{color:var(--accent)}
+.contradict .badge{font-size:16px}
+.meta{margin-left:auto;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.said{margin:6px 0;font-size:14px}
+.said .lbl,.src .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:block}
+.contradict .said q{text-decoration:line-through;text-decoration-color:var(--red)}
+.src{margin-top:6px;font-size:14px}
+.src .title{font-weight:600}
+.src .text{color:var(--ink);opacity:.9}
+mark{background:var(--amber-bg);color:inherit;padding:0 2px;border-radius:3px;font-weight:600}
+.src a{color:var(--blue);text-decoration:none;font-size:12px}
+.quiet{font-size:12px;color:var(--muted);padding:2px 4px;animation:in .25s}
+.empty{color:var(--muted);font-size:14px;border:1px dashed var(--line);border-radius:12px;padding:16px}
+.empty code{background:var(--grey-bg);padding:1px 5px;border-radius:5px}
+footer{margin-top:18px;font-size:12px;color:var(--muted)}
+.dino{display:inline-block}
+.contradict .dino{animation:stomp .5s ease-out}
+@keyframes stomp{0%{transform:scale(2.2) rotate(-15deg)}60%{transform:scale(.9)}100%{transform:scale(1)}}
+@media (max-width:480px){.stats{margin-left:0;width:100%}h1{font-size:21px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="logo">🦖</span>
+    <div><h1>Hallucinot</h1><div class="tag">For once, AI fixes <i>human</i> hallucinations · decisions by Drex</div></div>
+    <div class="stats">
+      <span>KB <b id="s-kb">–</b></span>
+      <span>decisions <b id="s-dec">0</b></span>
+      <span>cards <b id="s-cards">0</b></span>
+      <span>Drex median <b id="s-ms">–</b></span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <button class="mic" id="mic">🎙️ Start listening</button>
+    <form id="f"><input type="text" id="t" placeholder="…or type what someone says, then Enter" autocomplete="off"><button class="mic" style="background:var(--ink)">Check</button></form>
+  </div>
+  <div class="live" id="live"></div>
+  <div class="feed" id="feed">
+    <div class="empty" id="empty">Talk or type. Try <code>Why did churn go up in Q3?</code>, <code>Our SLA with Acme is 99.99% uptime</code>, <code>We switched redirects to 301</code>, or <code>let's grab lunch</code>.</div>
+  </div>
+  <footer>Knowledge: local files + GitHub PRs · Search: keyword · Every decision (speak? which doc? agree/contradict?) by Drex.</footer>
+</div>
+<script>
+const API = location.origin.startsWith('http') ? location.origin : 'http://localhost:8787';
+const feed = document.getElementById('feed'), live = document.getElementById('live');
+const S = {dec:0, cards:0, ms:[]};
+let history = [];
+
+fetch(API + '/api/kb').then(r => r.json()).then(k => document.getElementById('s-kb').textContent = k.chunks + ' chunks').catch(()=>{});
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function highlight(src, said){
+  // highlight numbers and words the statement and source share
+  const words = new Set((said.length > 400 ? '' : said).toLowerCase().match(/[a-z]{5,}/g)||[]);
+  return esc(src).replace(/(\$?\d[\d,.]*%?)|([A-Za-z]{4,})/g, (m, num, w) =>
+    num ? `<mark>${m}</mark>` : (words.has(m.toLowerCase()) ? `<mark>${m}</mark>` : m));
+}
+function median(a){if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);return s[Math.floor(s.length/2)]}
+function updStats(){
+  document.getElementById('s-dec').textContent=S.dec;document.getElementById('s-cards').textContent=S.cards;
+  const m=median(S.ms);document.getElementById('s-ms').textContent=m?m+' ms':'–';
+}
+function add(el){document.getElementById('empty')?.remove();feed.prepend(el);}
+
+function render(r){
+  S.dec++; (r.drex_ms||[]).forEach(x=>S.ms.push(x));
+  if(!r.show){
+    const q=document.createElement('div');q.className='quiet';
+    q.textContent=`🤫 stayed quiet — “${(r.text||'').slice(0,80)}” (${r.kind||'no match'}, ${r.total_ms||'?'} ms)`;
+    add(q); updStats(); return;
+  }
+  S.cards++;
+  const d=r.doc, v=r.verdict;
+  let cls='answer', badge='📄 Context';
+  if(r.kind==='page'){cls='page';badge='📎 From your knowledge base'}
+  if(v==='agree'){cls='agree';badge='✅ Checks out'}
+  if(v==='unclear'){cls='unclear';badge='🟡 Related — source doesn’t confirm'}
+  if(v==='contradict'){cls='contradict';badge='<span class="dino">🦖</span> Human hallucination detected'}
+  const ms=(r.drex_ms||[]).reduce((a,b)=>a+b,0);
+  const conf = v ? r.verdict_conf : r.doc_conf;
+  const el=document.createElement('div');el.className='card '+cls;
+  el.innerHTML=`
+    <div class="head"><span class="badge">${badge}</span><span class="meta">Drex ${ms} ms · ${Math.round((conf||0)*100)}% sure</span></div>
+    ${r.kind!=='page'?`<div class="said"><span class="lbl">${r.kind==='question'?'Asked':'You said'}</span><q>${esc(r.text)}</q></div>`:''}
+    <div class="src"><span class="lbl">${v==='contradict'?'Source actually says':'Source'}</span>
+      <div class="title">${esc(d.title)}${d.date?` · ${esc(d.date)}`:''}</div>
+      <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), r.text)}</div>
+      ${d.url?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>`:''}
+    </div>`;
+  add(el); updStats();
+}
+
+async function analyze(text, mode='speech'){
+  text=text.trim(); if(!text) return;
+  try{
+    const r=await fetch(API+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text,mode,previous:history.slice(-4).join(' ')})}).then(r=>r.json());
+    if(r.error) throw new Error(r.error);
+    render(r);
+  }catch(e){const q=document.createElement('div');q.className='quiet';q.textContent='⚠️ '+e.message;add(q);}
+  if(mode==='speech') history.push(text);
+}
+
+document.getElementById('f').addEventListener('submit',e=>{e.preventDefault();const t=document.getElementById('t');analyze(t.value);t.value='';});
+
+// ---- speech to text (Chrome Web Speech API)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const mic = document.getElementById('mic'); let rec=null, listening=false;
+if(!SR){mic.disabled=true;mic.textContent='🎙️ Mic needs Chrome';}
+mic.addEventListener('click',()=>{
+  if(listening){listening=false;rec&&rec.stop();mic.classList.remove('on');mic.textContent='🎙️ Start listening';live.textContent='';return;}
+  rec=new SR();rec.continuous=true;rec.interimResults=true;rec.lang='en-US';
+  rec.onresult=e=>{
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const res=e.results[i];
+      if(res.isFinal){live.textContent='';analyze(res[0].transcript);} else interim+=res[0].transcript;
+    }
+    if(interim) live.textContent='… '+interim;
+  };
+  rec.onerror=e=>{live.textContent='mic: '+e.error};
+  rec.onend=()=>{if(listening) try{rec.start()}catch(_){}};
+  rec.start();listening=true;mic.classList.add('on');mic.textContent='⏹ Listening — click to stop';
+});
+
+// ---- page mode: Chrome extension posts the current tab's text here
+window.addEventListener('message',e=>{if(e.data&&e.data.type==='hallucinot-page'&&e.data.text) analyze(e.data.text,'page');});
+if(new URLSearchParams(location.search).has('panel')) document.body.style.fontSize='14px';
+</script>
+</body>
+</html>

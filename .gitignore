@@ -1,0 +1,6 @@
+.nace_key
+.env
+__pycache__/
+*.pyc
+.claude/
+.DS_Store
