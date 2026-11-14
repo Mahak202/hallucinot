@@ -386,7 +386,7 @@ STARTER = [
     {"id": "memory", "icon": "🧠", "name": "Decision recorder", "type": "learn", "source": "starter",
      "rule": "Is the speaker announcing a new decision or a change to how things are, as settled fact (not asking, guessing, or proposing)?"},
 ]
-AGENTS, LEARNED, ACTIONS = [], [], []
+AGENTS, LEARNED, ACTIONS, SESSION = [], [], [], []
 AGENT_STATS = collections.defaultdict(lambda: {"fired": 0, "corrected": 0})
 LAST_FLAG = {}
 LOCK = threading.Lock()
@@ -613,6 +613,11 @@ def analyze_live(text, previous="", ws="company"):
         if out.get("status") in ("contradict", "outdated", "agree", "context", "agree_new"):
             AGENT_STATS["fact" if out["status"] != "context" else "suggest"]["fired"] += 1
     out["agents"] = hits
+    with LOCK:
+        SESSION.append({"t": time.strftime("%H:%M"), "speaker": speaker, "text": text, "status": out.get("status"),
+                        "fix": out.get("fix"), "source": (out.get("doc") or {}).get("title"),
+                        "older": (out.get("older") or {}).get("title"),
+                        "hits": [{"name": h["name"], "type": h["type"], "detail": h.get("detail")} for h in hits]})
     out["show"] = bool(hits) or out.get("status") in ("contradict", "outdated", "agree", "agree_new", "context", "learned_update")
     out["total_ms"] = round((time.time() - t0) * 1000)
     return out
@@ -641,6 +646,84 @@ def agents_view():
     return {"agents": [{**{k: v for k, v in x.items() if k in ("id", "icon", "name", "type", "rule", "source", "doc")},
                         **AGENT_STATS[x["id"]]} for x in AGENTS],
             "learned": LEARNED[::-1], "actions": ACTIONS[::-1]}
+
+
+# ---------------------------------------------------------------- meeting recap + Intern handoff
+DEEPINFRA_MODEL = os.environ.get("DEEPINFRA_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo")
+
+
+def secret(name, env):
+    v = os.environ.get(env)
+    if v:
+        return v.strip()
+    f = os.path.join(ROOT, name)
+    return open(f).read().strip() if os.path.exists(f) else ""
+
+
+def recap_facts():
+    who = lambda e: e["speaker"] or "Someone"
+    corrections, policy, leaks, flags = [], [], [], []
+    for e in SESSION:
+        if e["status"] == "contradict":
+            corrections.append(f"{who(e)} said \"{e['text']}\" but {e['source']} says: {e.get('fix') or 'something different'}")
+        if e["status"] == "outdated":
+            corrections.append(f"{who(e)} said \"{e['text']}\" but this changed in the meeting ({e['source']}); {e.get('older') or 'the doc'} may be outdated")
+        for h in e["hits"]:
+            if h["name"] == "Policy guard":
+                policy.append(f"{who(e)}: \"{e['text']}\" (rule: {h['detail']})")
+            elif h["name"] == "Leak guard":
+                leaks.append(f"{who(e)} shared sensitive information: \"{e['text'][:80]}\". Rotate or redact it.")
+            elif h["type"] == "flag" and h["name"] not in ("Policy guard",):
+                flags.append(f"{h['name']}: {who(e)}: \"{e['text']}\"")
+    return {"decisions": [f"{x['who']}: {x['text']}" for x in LEARNED],
+            "action_items": [f"{x['who']}: {x['text']}" for x in ACTIONS],
+            "corrections": corrections, "policy_flags": policy, "security": leaks, "other_flags": flags,
+            "sentences_checked": len(SESSION)}
+
+
+def template_recap(f):
+    sec = [("✅ Decisions", f["decisions"]), ("📝 Action items", f["action_items"]), ("🦖 Corrections", f["corrections"]),
+           ("⚖️ Policy flags", f["policy_flags"]), ("🔒 Security", f["security"]), ("🚩 Other flags", f["other_flags"])]
+    lines = [f"*Meeting recap* ({f['sentences_checked']} statements checked by Hallucinot)"]
+    for title, items in sec:
+        if items:
+            lines.append(f"\n*{title}*")
+            lines += [f"• {i}" for i in items]
+    return "\n".join(lines)
+
+
+def write_recap():
+    f = recap_facts()
+    key = secret(".deepinfra_key", "DEEPINFRA_API_KEY")
+    text, writer = None, "template"
+    if key:
+        prompt = ("Write a short Slack meeting recap from these facts. Use only these facts, invent nothing. "
+                  "Sections (skip empty ones): Decisions, Action items (with owner), Corrections, Policy flags, Security. "
+                  "Use Slack formatting (*bold*, • bullets). Under 180 words.\n\nFACTS:\n" + json.dumps(f, indent=1))
+        try:
+            req = urllib.request.Request("https://api.deepinfra.com/v1/openai/chat/completions",
+                                         data=json.dumps({"model": DEEPINFRA_MODEL, "max_tokens": 500, "temperature": 0.2,
+                                                          "messages": [{"role": "user", "content": prompt}]}).encode(),
+                                         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+            text = json.load(urllib.request.urlopen(req, timeout=40))["choices"][0]["message"]["content"].strip()
+            writer = f"DeepInfra · {DEEPINFRA_MODEL.split('/')[-1]}"
+        except Exception as e:
+            print("DeepInfra recap failed:", e)
+    if not text:
+        text = template_recap(f)
+    intern = ""
+    if f["action_items"]:
+        intern = "@Intern please follow up on these action items from today's meeting:\n" + \
+                 "\n".join(f"• {a}" for a in f["action_items"])
+    return {"recap": text, "writer": writer, "intern_message": intern, "facts": f}
+
+
+def post_slack(text):
+    url = secret(".slack_webhook", "SLACK_WEBHOOK_URL")
+    if not url:
+        raise RuntimeError("No Slack webhook connected yet")
+    req = urllib.request.Request(url, data=json.dumps({"text": text}).encode(), headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(req, timeout=20).read()
 
 
 # ---------------------------------------------------------------- replay insurance
@@ -685,6 +768,9 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/agents"):
             return self._send(200, agents_view())
+        if self.path.startswith("/api/integrations"):
+            return self._send(200, {"slack": bool(secret(".slack_webhook", "SLACK_WEBHOOK_URL")),
+                                    "deepinfra": bool(secret(".deepinfra_key", "DEEPINFRA_API_KEY"))})
         if self.path.startswith("/api/kb"):
             by = collections.Counter(c["kind"] for c in CHUNKS)
             wss = {ws: len(I["chunks"]) for ws, I in INDEXES.items()}
@@ -717,9 +803,24 @@ class H(BaseHTTPRequestHandler):
                 return self._send(502, {"error": f"NDI could not parse {name}: {e}"})
             STATS["ndi_pages"] += res.get("pages") or 1
             return self._send(200, res)
-        if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add"):
+        if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add",
+                         "/api/recap", "/api/slack", "/api/slack/connect"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        if route == "/api/recap":
+            return self._send(200, write_recap())
+        if route == "/api/slack/connect":
+            url = (body.get("url") or "").strip()
+            if not url.startswith("https://hooks.slack.com/"):
+                return self._send(400, {"error": "Paste a Slack incoming-webhook URL (https://hooks.slack.com/...)"})
+            fd = os.open(os.path.join(ROOT, ".slack_webhook"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            os.write(fd, url.encode()); os.close(fd)
+            return self._send(200, {"ok": True})
+        if route == "/api/slack":
+            try:
+                post_slack((body.get("text") or "")[:3500]); return self._send(200, {"ok": True})
+            except Exception as e:
+                return self._send(400, {"error": str(e)})
         if route == "/api/kb/add":  # add a parsed document to the knowledge base; its rules become agents
             text, name = (body.get("text") or "")[:200000], re.sub(r"[^\w.\- ]", "_", body.get("name") or "uploaded")[:120]
             ws = body.get("ws") or "company"
@@ -752,7 +853,7 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, agents_view())
         if self.path == "/api/reset":  # clear what was learned this session (for rehearsals)
             with LOCK:
-                CHUNKS[:] = [c for c in CHUNKS if c["kind"] != "learned"]; LEARNED.clear(); ACTIONS.clear()
+                CHUNKS[:] = [c for c in CHUNKS if c["kind"] != "learned"]; LEARNED.clear(); ACTIONS.clear(); SESSION.clear()
                 AGENT_STATS.clear(); LAST_FLAG.clear(); build_index()
             return self._send(200, agents_view())
         rkey = replay_key(route, body)

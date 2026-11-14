@@ -142,6 +142,7 @@ button.copy{border:1px solid var(--line);background:var(--panel);color:var(--ink
 button.mic.small{padding:6px 12px;font-size:13px;margin-left:auto}
 button.mic.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:0}
 #ndinote{margin-top:8px}
+#recapout{white-space:pre-wrap;font:12px/1.5 ui-monospace,Menlo,monospace;background:var(--grey-bg);border-radius:8px;padding:8px;margin:6px 0;max-height:320px;overflow:auto}
 #fixedout{white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0 0 10px}
 @media (max-width:480px){.ws{margin-left:0}.samples{margin-left:0}.stats{margin-left:0;width:100%}h1{font-size:21px}}
 </style>
@@ -197,6 +198,22 @@ button.mic.ghost{background:transparent;color:var(--accent);border:1px solid var
     </div>
     <div class="box"><div class="bh">📝 Action items</div><div id="actions" class="lst"><span class="sumtxt">Promises and to-dos land here automatically.</span></div></div>
     <div class="box"><div class="bh">🧠 Learned today</div><div id="learned" class="lst"><span class="sumtxt">Decisions announced in the meeting are remembered automatically.</span></div></div>
+    <div class="box">
+      <div class="bh">📋 After the meeting</div>
+      <button class="mic small" id="recapbtn" type="button" style="margin-left:0">Write recap</button>
+      <div id="recapwriter" class="sumtxt" style="margin-top:6px"></div>
+      <pre id="recapout" hidden></pre>
+      <div class="row" id="recapacts" hidden style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="copy" id="copyrecap" type="button">Copy recap</button>
+        <button class="copy" id="copyintern" type="button">Copy @Intern hand-off</button>
+        <button class="copy" id="sendslack" type="button">Send to Slack</button>
+      </div>
+      <details style="margin-top:6px"><summary class="sumtxt">Connect Slack (for @Intern)</summary>
+        <input type="text" id="slackurl" placeholder="https://hooks.slack.com/services/…" style="width:100%;margin-top:6px;font-size:12px;padding:6px">
+        <button class="copy" id="slackconnect" type="button" style="margin-top:4px">Save webhook</button>
+      </details>
+      <div id="recapnote" class="sumtxt"></div>
+    </div>
     <a href="#" id="reset" class="sumtxt">↺ Reset session</a>
   </aside>
   </section>
@@ -348,6 +365,31 @@ document.addEventListener('click', async e=>{ const b=e.target.closest('[data-de
 document.getElementById('reset').addEventListener('click', async e=>{ e.preventDefault();
   await fetch(API+'/api/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); feed.innerHTML=''; history=[]; refreshPanel(); });
 refreshPanel();
+let RECAP = null;
+document.getElementById('recapbtn').addEventListener('click', async e => {
+  const b = e.target; b.disabled = true; b.textContent = 'Writing…';
+  try {
+    RECAP = await fetch(API + '/api/recap', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}).then(r => r.json());
+    const out = document.getElementById('recapout'); out.hidden = false;
+    out.textContent = RECAP.recap + (RECAP.intern_message ? '\n\n' + RECAP.intern_message : '');
+    document.getElementById('recapwriter').textContent = 'Facts decided by Drex · written by ' + RECAP.writer;
+    document.getElementById('recapacts').hidden = false;
+  } catch(err) { document.getElementById('recapnote').textContent = '⚠️ ' + err.message; }
+  b.disabled = false; b.textContent = 'Write recap';
+});
+document.getElementById('copyrecap').addEventListener('click', e => RECAP && copyText(RECAP.recap, e.target));
+document.getElementById('copyintern').addEventListener('click', e => RECAP && copyText(RECAP.intern_message || RECAP.recap, e.target));
+document.getElementById('sendslack').addEventListener('click', async e => {
+  if (!RECAP) return; const note = document.getElementById('recapnote');
+  const r = await fetch(API + '/api/slack', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({text: RECAP.recap + (RECAP.intern_message ? '\n\n' + RECAP.intern_message : '')})}).then(r => r.json());
+  note.textContent = r.ok ? '✅ Posted to Slack. @Intern will pick up the action items.' : '⚠️ ' + r.error + ' (use Copy and paste into Slack).';
+});
+document.getElementById('slackconnect').addEventListener('click', async () => {
+  const url = document.getElementById('slackurl').value.trim(), note = document.getElementById('recapnote');
+  const r = await fetch(API + '/api/slack/connect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url})}).then(r => r.json());
+  note.textContent = r.ok ? '✅ Slack connected.' : '⚠️ ' + r.error; if (r.ok) document.getElementById('slackurl').value = '';
+});
 
 async function analyze(text, mode='speech'){
   text=text.trim(); if(!text) return;
