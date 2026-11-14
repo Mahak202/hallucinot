@@ -202,7 +202,13 @@ def drex(state, questions):
     req = urllib.request.Request(DREX_URL, data=body, headers={"Authorization": "Bearer " + KEY,
                                                                "Content-Type": "application/json"})
     t = time.time()
-    r = json.load(urllib.request.urlopen(req, timeout=30))
+    try:
+        r = json.load(urllib.request.urlopen(req, timeout=30))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        if e.code == 403 and "Security Checkpoint" in body:
+            raise RuntimeError("Nace's Drex API is temporarily unreachable (Vercel security checkpoint on console.nace.ai)")
+        raise RuntimeError(f"Drex API error {e.code}: {body[:160]}")
     r["_ms"] = round((time.time() - t) * 1000)
     return r
 
@@ -637,6 +643,23 @@ def agents_view():
             "learned": LEARNED[::-1], "actions": ACTIONS[::-1]}
 
 
+# ---------------------------------------------------------------- replay insurance
+REPLAY_FILE = os.path.join(DATA, "replay.json")
+REPLAY = json.load(open(REPLAY_FILE)) if os.path.exists(REPLAY_FILE) else {}
+
+
+def replay_key(route, body):
+    return f"{route}|{body.get('ws') or 'company'}|{body.get('mode', 'speech')}|{(body.get('text') or '').strip()[:500]}"
+
+
+def remember_replay(key, res):
+    REPLAY[key] = res
+    try:
+        json.dump(REPLAY, open(REPLAY_FILE, "w"))
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------- HTTP
 STATS = {"decisions": 0, "cards": 0, "ms": []}
 # guardrails for when the app is exposed publicly (e.g. via ngrok): caps Drex spend
@@ -732,17 +755,22 @@ class H(BaseHTTPRequestHandler):
                 CHUNKS[:] = [c for c in CHUNKS if c["kind"] != "learned"]; LEARNED.clear(); ACTIONS.clear()
                 AGENT_STATS.clear(); LAST_FLAG.clear(); build_index()
             return self._send(200, agents_view())
+        rkey = replay_key(route, body)
         try:
             if self.path == "/api/check":
                 res = check_document(body.get("text", "")[:20000], ws)
                 STATS["decisions"] += res["drex_calls"]
+                remember_replay(rkey, res)
                 return self._send(200, res)
             if body.get("mode", "speech") == "speech":
                 res = analyze_live(body.get("text", ""), body.get("previous", ""), ws)
             else:
                 res = analyze(body.get("text", ""), body.get("mode", "speech"), body.get("previous", ""), ws)
-        except Exception as e:  # keep the demo alive
-            return self._send(500, {"error": str(e)})
+        except Exception as e:  # keep the demo alive: fall back to a recorded real answer if we have one
+            if rkey in REPLAY:
+                return self._send(200, {**REPLAY[rkey], "replayed": True, "replay_reason": str(e)})
+            return self._send(503, {"error": str(e)})
+        remember_replay(rkey, res)
         STATS["decisions"] += 1; STATS["cards"] += bool(res.get("show"))
         if res.get("drex_ms"): STATS["ms"] = (STATS["ms"] + res["drex_ms"])[-200:]
         self._send(200, res)
