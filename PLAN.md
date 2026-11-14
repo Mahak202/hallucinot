@@ -20,7 +20,7 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ## 🧑‍💻 Harsh: main demo and Nace judges
 | # | Task | Status | Notes |
 |---|---|---|---|
-| H1 | Ask organizers: is code written before 11:00 OK? | ⬜ | |
+| H1 | Ask organizers: is code written before 11:00 OK? | ❌ | Dropped |
 | H2 | Ask Nace team how to use **NDI** (endpoint, input, output); paste the answer in the log | ⬜ | |
 | H3 | Test mic in real Chrome at localhost:8787 | ⬜ | |
 | H4 | Load the extension (`chrome://extensions` → Load unpacked → `extension/`) and test on Gmail/GitHub | ⬜ | |
@@ -66,7 +66,6 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ## ❓ Open questions
 - What do the Adobe judges score? (M1)
 - How does NDI work? (H2)
-- Is pre-11:00 code allowed? (H1)
 
 ---
 
