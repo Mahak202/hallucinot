@@ -401,6 +401,24 @@ def verify(sentence, cands, doc_answer):
     return best[0], best[1], best[2], None, ms
 
 
+def negotiate(statement, rule_text, fact_doc):
+    """Two agents disagree about the same statement: Policy guard flagged it by a rule's wording,
+    while Fact checker independently found it matches the real source. A third Drex call arbitrates
+    between the two agents' positions instead of just stacking both cards."""
+    r = drex(
+        {"statement": statement,
+         "policy_guard_position": f"Flagged by matching the wording of this rule: \"{rule_text}\"",
+         "fact_checker_position": f"Checked against the source \"{fact_doc['title']}\": \"{fact_doc['text'][:600]}\" — found the statement matches this source, not contradicting it."},
+        {"call": {"type": "choice",
+                  "instructions": "Our Policy guard and Fact checker disagree about this statement. Policy guard matched it against a rule's wording alone. Fact checker checked the actual source document and found it matches. Read the rule and the source carefully: are they really about the same kind of thing (so the rule's concern still stands on its own), or does the source describe a different, already-authorized mechanism that the rule wasn't written for, making the policy flag a false alarm from keyword matching? Decide the final call.",
+                  "criteria": {
+                      "stand_down": "The source shows this is a different, already-authorized mechanism than what the rule is about — the policy flag is a false alarm; withdraw it",
+                      "uphold": "The rule is about this exact same thing and still applies on its own even though the source doesn't contradict the statement — keep the policy flag",
+                      "both": "Both concerns are legitimate on their own terms and should stay visible"}}})
+    a = r["answers"]["call"]
+    return a["choice"], round(a.get("confidence", 0), 2), r["_ms"]
+
+
 def analyze_live(text, previous="", ws="company"):
     """Multi-agent pass over one spoken sentence. Drex makes every call."""
     t0 = time.time()
@@ -486,6 +504,19 @@ def analyze_live(text, previous="", ws="company"):
                 hits.append({"id": rid, "icon": "⚖️", "name": "Policy guard", "type": "flag", "prob": round(ans["noul"], 2),
                              "detail": r["rule"], "doc": r.get("doc", "")})
                 LAST_FLAG[ws] = {"text": text, "source": r["rule"], "agent": rid, "t": time.time()}
+        if hits and out.get("status") in ("agree", "agree_new") and out.get("doc"):
+            # Policy guard and Fact checker disagree on the same statement: let Drex arbitrate.
+            winner, conf, ms2 = negotiate(text, hits[0]["detail"], out["doc"])
+            out["drex_ms"].append(ms2)
+            if winner == "stand_down":
+                hits.clear()
+                note = f"Fact checker matched this against {citation(out['doc'])}, which covers this exact case — Drex sided with the Fact checker and stood the policy flag down."
+            elif winner == "uphold":
+                note = "The source doesn't contradict the statement, but the policy rule still applies on its own terms — Drex kept the policy flag."
+            else:
+                note = "Both agents have a legitimate point here — Drex kept both flags visible."
+            hits.append({"id": "negotiate", "icon": "🤝", "name": "Agents negotiated", "type": "negotiate",
+                         "prob": conf, "detail": note})
     if p("leak") > 0.6:
         hits.append({"id": "leak", "icon": "🔒", "name": "Leak guard", "type": "flag", "prob": round(p("leak"), 2),
                      "detail": "Sensitive information said out loud. Rotate or redact it."})

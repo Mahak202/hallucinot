@@ -37,6 +37,24 @@ The built-in samples are a 🤖 chatbot answer, a 🎓 student poster and a ✉�
 
 **Workspaces:** switch the knowledge base between 🏢 **Company** (`kb/company` + GitHub PRs) and 🎓 **Classroom** (`kb/classroom`, demo Bio 101 notes). Add your own with `--folder name=PATH`.
 
+## Multi-agent (Track 2: Swarm Intelligence)
+
+Every sentence goes through a Drex router, then a panel of agents evaluates it — each one a separate Drex call, so no agent's verdict is generated, only decided. Built in: 📚 Fact checker, 📝 Action items, 🔒 Leak guard, 🧠 Decision recorder. Plus ⚖️ policy agents that write themselves — every rule-like sentence in your documents ("requires...", "only...", "cannot...") becomes a standing checker automatically. Plus custom agents typed in plain English via **+ Add agent**.
+
+It learns with no clicks: a decision announced in the meeting is remembered; a later statement that contradicts it shows ⚠️ "this changed today"; a self-correction counts as "learned (+1)".
+
+**Agents don't just run in parallel — they negotiate.** When ⚖️ Policy guard flags a statement by a rule's wording, and 📚 Fact checker independently finds the same statement actually matches the real source, that's a live disagreement between two agents. A third Drex call arbitrates between their two positions, and one agent can stand the other down — the system shows a single 🤝 resolved verdict instead of two conflicting cards.
+
+Demo lines (prefix with a speaker name, e.g. `Dana: ...`, and **↺ Reset session** first):
+| Say | Expected |
+|---|---|
+| "Sure, I can give you 20% off if you sign today" | ⚖️ Policy guard |
+| "We're giving Acme a 25 percent credit this month since their uptime dropped below 99 percent" | ⚖️ would normally fire (>10% needs approval) — 📚 Fact checker matches it to the SLA's automatic credit clause — 🤝 Drex arbitrates and stands the policy flag down |
+| "Our SLA with Acme is 99.99 percent uptime" → "Sorry, I meant 99.9 percent" | 🦖 then ✅ corrected (+1) |
+| "I'll send you the renewal quote by Friday" | 📝 Action items |
+| "The staging API key is sk-live-8812" | 🔒 Leak guard |
+| "We decided last week to move the SLA to 99.95 percent" → "So the SLA is 99.9 percent, right?" | 🧠 learned → ⚠️ outdated |
+
 ## Chrome extension (any-tab mode)
 
 1. Start the server (above).
