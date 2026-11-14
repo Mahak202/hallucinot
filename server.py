@@ -210,6 +210,10 @@ def analyze(text, mode="speech", previous=""):
 
 # ---------------------------------------------------------------- HTTP
 STATS = {"decisions": 0, "cards": 0, "ms": []}
+# guardrails for when the app is exposed publicly (e.g. via ngrok): caps Drex spend
+RATE = collections.defaultdict(list)
+PER_IP_PER_MIN = int(os.environ.get("HALLUCINOT_PER_IP_PER_MIN", 30))
+MAX_DECISIONS = int(os.environ.get("HALLUCINOT_MAX_DECISIONS", 3000))
 
 
 class H(BaseHTTPRequestHandler):
@@ -243,6 +247,12 @@ class H(BaseHTTPRequestHandler):
         if self.path != "/api/analyze":
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
+        now = time.time()
+        hits = [t for t in RATE[ip] if now - t < 60]
+        RATE[ip] = hits + [now]
+        if len(hits) >= PER_IP_PER_MIN or STATS["decisions"] >= MAX_DECISIONS:
+            return self._send(429, {"error": "Slow down: demo rate limit reached"})
         try:
             res = analyze(body.get("text", ""), body.get("mode", "speech"), body.get("previous", ""))
         except Exception as e:  # keep the demo alive
