@@ -878,6 +878,71 @@ def register_team(name, oneliner="", repo=""):
     return team
 
 
+def ndi_parse_url(url, name):
+    """NDI parses a public file link directly (no download on our side)."""
+    key = os.environ.get("NACE_API_KEY") or open(os.path.join(ROOT, ".nace_key")).read().strip()
+    req = urllib.request.Request(NACE + "/v1/documents/parse?wait_seconds=90", method="POST",
+                                 data=json.dumps({"source": {"type": "url", "url": url, "file_name": name},
+                                                  "output": {"formats": ["markdown"]}}).encode(),
+                                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+    j = json.load(urllib.request.urlopen(req, timeout=120))
+    if j.get("status") != "succeeded":
+        raise RuntimeError(f"NDI {j.get('status')}")
+    doc = j["result"]["document"]
+    return re.sub(r"^-{3}\s*Page \d+\s*-{3}\s*$", "", doc.get("markdown") or doc.get("text") or "", flags=re.M)
+
+
+def parse_submissions(raw):
+    """Accept Nace's submissions export as CSV or JSON. Column names are matched loosely."""
+    import csv, io
+    raw = raw.strip()
+    rows = []
+    if raw.startswith("[") or raw.startswith("{"):
+        data = json.loads(raw)
+        rows = data if isinstance(data, list) else data.get("submissions") or data.get("data") or [data]
+    else:
+        rows = list(csv.DictReader(io.StringIO(raw)))
+    def pick(r, *keys):
+        for k, v in r.items():
+            kk = re.sub(r"[^a-z]", "", str(k).lower())
+            if any(x in kk for x in keys) and v:
+                return str(v).strip()
+        return ""
+    out = []
+    for r in rows:
+        r = {str(k): v for k, v in r.items()}
+        out.append({"team": pick(r, "teamname", "team"), "project": pick(r, "projectname", "project", "title"),
+                    "explanation": pick(r, "explanation", "description", "brief", "summary"),
+                    "repo": pick(r, "repo", "code", "github"), "slides": pick(r, "presentation", "slides", "deck"),
+                    "demo": pick(r, "demo")})
+    return [x for x in out if x["team"] or x["project"]]
+
+
+def import_submission(sub):
+    name = sub["team"] or sub["project"]
+    one = (sub["project"] + ": " if sub["project"] else "") + " ".join(sub["explanation"].split()[:35])
+    repo = sub["repo"] if "github.com" in sub["repo"] else ""
+    team = register_team(name, one, repo)
+    notes = []
+    if sub["explanation"]:
+        with LOCK:
+            add_document(sub["explanation"], f"{name} submission", team["slug"]); build_index()
+        team["sections"] = team.get("sections", 0) + 1
+    link = sub["slides"]
+    if link.startswith("http"):
+        fname = re.sub(r"[?#].*$", "", link.rstrip("/").split("/")[-1]) or "slides.pdf"
+        if not re.search(r"\.(pdf|pptx?|docx?|png|jpe?g)$", fname, re.I):
+            fname += ".pdf"
+        try:
+            text = ndi_parse_url(link, fname)
+            with LOCK:
+                team["sections"] = team.get("sections", 0) + add_document(text, f"{name} slides", team["slug"]); build_index()
+            notes.append("slides parsed by NDI")
+        except Exception as e:
+            notes.append(f"slides not readable ({str(e)[:60]}); upload the PDF instead")
+    return {"team": team["name"], "sections": team.get("sections", 0), "notes": notes}
+
+
 def judge_analyze(text, override=None):
     t0 = time.time()
     text = re.sub(r"^[A-Z][a-z]{1,15}:\s*", "", text.strip())
@@ -997,7 +1062,7 @@ class H(BaseHTTPRequestHandler):
             STATS["ndi_pages"] += res.get("pages") or 1
             return self._send(200, res)
         if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add",
-                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register"):
+                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register", "/api/judge/import"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if route == "/api/judge/teams":
@@ -1012,6 +1077,19 @@ class H(BaseHTTPRequestHandler):
                 except Exception as e:
                     errors.append(f"{line.strip()[:60]}: {e}")
             return self._send(200, {"added": added, "errors": errors, "teams": JUDGE["teams"]})
+        if route == "/api/judge/import":
+            try:
+                subs = parse_submissions(body.get("raw") or "")
+            except Exception as e:
+                return self._send(400, {"error": f"Could not read that export: {e}"})
+            done, errors = [], []
+            with concurrent.futures.ThreadPoolExecutor(4) as ex:
+                for sub, fut in [(x, ex.submit(import_submission, x)) for x in subs]:
+                    try:
+                        done.append(fut.result())
+                    except Exception as e:
+                        errors.append(f"{sub['team'] or sub['project']}: {e}")
+            return self._send(200, {"imported": done, "errors": errors, "teams": JUDGE["teams"]})
         if route == "/api/judge/register":
             try:
                 t = register_team(body.get("name", ""), body.get("oneliner", ""), body.get("repo", ""))

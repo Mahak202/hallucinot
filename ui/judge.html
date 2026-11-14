@@ -92,6 +92,13 @@ code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
         <div id="teams"><span class="muted">No teams yet.</span></div>
       </div>
       <div class="box">
+        <div class="bh">📥 Import Nace submissions</div>
+        <div class="muted">Ask the Nace organizers for the submissions export (CSV or JSON) and drop it here. It reads team name, project, explanation, repo link and slides link (slides parsed by NDI).</div>
+        <input type="file" id="subfile" accept=".csv,.json,.txt" style="margin-top:8px">
+        <textarea id="subraw" placeholder="…or paste the CSV / JSON here" style="margin-top:6px"></textarea>
+        <div class="row" style="margin-top:6px"><button id="subgo">Import submissions</button><span id="subnote" class="muted"></span></div>
+      </div>
+      <div class="box">
         <div class="bh">➕ Add teams</div>
         <div class="muted">Share this link so teams register themselves:</div>
         <div class="row" style="margin:4px 0 8px"><code id="reglink"></code><button class="ghost" id="copyreg" style="padding:3px 10px;font-size:12px">Copy</button></div>
@@ -170,6 +177,14 @@ $('bulkgo').addEventListener('click', async () => {
   $('bulknote').textContent = 'Importing…';
   const r = await post('/api/judge/teams', {lines: $('bulk').value});
   $('bulknote').textContent = `✅ ${r.added.length} imported` + (r.errors.length ? ` · ⚠️ ${r.errors.join('; ')}` : '');
+  refresh();
+});
+$('subfile').addEventListener('change', async e => { const f = e.target.files[0]; if (f) $('subraw').value = await f.text(); });
+$('subgo').addEventListener('click', async () => {
+  const note = $('subnote'); note.textContent = 'Importing… (repos and slides take a few seconds each)';
+  const r = await post('/api/judge/import', {raw: $('subraw').value});
+  if (r.error) { note.textContent = '⚠️ ' + r.error; return; }
+  note.innerHTML = `✅ ${r.imported.length} teams imported` + r.imported.filter(x => x.notes.length).map(x => `<br>· ${esc(x.team)}: ${esc(x.notes.join(', '))}`).join('') + (r.errors.length ? `<br>⚠️ ${esc(r.errors.join('; '))}` : '');
   refresh();
 });
 $('reset').addEventListener('click', async e => { e.preventDefault(); await post('/api/judge/reset', {}); $('feed').innerHTML=''; refresh(); });
