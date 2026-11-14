@@ -21,7 +21,7 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 | # | Task | Status | Notes |
 |---|---|---|---|
 | H1 | Ask organizers: is code written before 11:00 OK? | ❌ | Dropped |
-| H2 | Ask Nace team how to use **NDI** (endpoint, input, output); paste the answer in the log | ⬜ | |
+| H2 | Ask Nace team how to use **NDI** (endpoint, input, output); paste the answer in the log | ✅ | Found in docs: NDI = "Perception" API, same key |
 | H3 | Test mic in real Chrome at localhost:8787 | ⬜ | |
 | H4 | Load the extension (`chrome://extensions` → Load unpacked → `extension/`) and test on Gmail/GitHub | ⬜ | |
 | H5 | Decide: install c2patool for the "Certify" stamp (yes/no) | ⬜ | |
@@ -47,7 +47,7 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 | C2 | **Cite:** ✅ claims get citations plus a References list | ✅ | "Copy fixed version + citations" button |
 | C3 | **Certify:** Content Credentials stamp, verifiable on Adobe's site (needs H5 = yes) | ⬜ | |
 | C4 | Wire the T-Rex images into the cards (needs M4) | ⬜ | |
-| C5 | Plug in NDI for PDFs (needs H2) | ⬜ | |
+| C5 | Plug in NDI for PDFs (needs H2) | ✅ | PDF, PNG/JPG (OCR), Word, PowerPoint; plus ➕ Add to knowledge |
 
 ## ✅ Already done
 - Live mode: mic or typing → Drex decides → 📄 context / ✅ checks out / 🦖 hallucination / 🤫 stays quiet (about 0.3 s per decision)
@@ -70,6 +70,7 @@ Add notes or questions under **Updates log** at the bottom (newest first).
 ---
 
 ## 📝 Updates log (newest first)
+- **12:55 Claude:** **NDI is in.** NDI = Nace "Perception" API (same key and balance as Drex, about $0.0035/page). 📎 **Open file** in Check a document now sends PDFs, **PNG/JPG (OCR, so Adobe Express image exports work)**, Word and PowerPoint through NDI. New **➕ Add to knowledge** button: an uploaded doc joins the knowledge base and **its rules become new policy agents automatically**. Tested: PNG poster OCR'd in 2.8 s ($0.0035) → 2 🦖 caught; a refund-policy PDF added → 3 new agents → live "we can refund you even though it's been 45 days" → 🦖 with the fix "Refunds are only available within 30 days." **Mahak:** an Adobe Express PNG export is fine now, no need for PDF.
 - **12:05 Claude (via Mahak):** Added real agent-to-agent negotiation for Track 2. Before this, the "agents" were parallel — each made its own call on the same sentence but never reacted to each other, which doesn't actually satisfy "coordinate, compete, or negotiate." Now: when ⚖️ Policy guard flags a statement by a rule's wording **and** 📚 Fact checker independently finds it matches the real source, that's a disagreement — a third Drex call arbitrates between the two agents' positions and either stands the policy flag down, upholds it, or keeps both. Demo line (reset session first): "Dana: We're giving Acme a 25 percent credit this month since their uptime dropped below 99 percent." → Policy guard would normally flag this (>10% "discount" needs CFO approval) but Fact checker matches it to the SLA's automatic 25%-below-99%-uptime credit clause. Drex arbitrates, recognizes a service credit isn't the discretionary discount the rule means, and stands the policy flag down → single 🤝 "Agents negotiated" card instead of two conflicting ones (tested stable, 91% confidence across 5 runs). `git pull` to get it.
 - **11:50 Claude:** Multi-agent is live. Every sentence goes through a Drex router plus agents in parallel (~0.6–1 s). Agents: 📚 Fact checker, 💡 Suggest, 📝 Action items, 🔒 Leak guard, 🧠 Decision recorder, plus ⚖️ 8 policy agents created **automatically from the docs**, plus custom agents typed in plain English. It learns with no clicks: decisions said in the meeting are remembered, later contradictions show ⚠️ "this changed today", and self-corrections count as "learned (+1)". Demo lines (type them with a speaker name, e.g. `Dana: ...`): "Sure, I can give you 20% off if you sign today" → ⚖️ · "Our SLA with Acme is 99.99 percent uptime" → 🦖 · "Sorry, I meant 99.9 percent" → ✅ corrected +1 · "I'll send you the renewal quote by Friday" → 📝 · "The staging API key is sk-live-8812" → 🔒 · add agent "Does the speaker mention a competitor?" then "Datadog gave us a better price" → 🚩 · "We decided last week to move the SLA to 99.95 percent" → 🧠 · "So the SLA is 99.9 percent, right?" → ⚠️. Use **↺ Reset session** before the demo.
 - **11:35 Claude:** Fix + Cite done. Poster: 3 wrong lines replaced with the correct sentences from the notes, plus a References list. Live red cards now show the correct line too. `git pull` to get it.

@@ -130,6 +130,8 @@ textarea{width:100%;min-height:150px;border:0;outline:0;resize:vertical;backgrou
 .cite{font-size:12px;color:var(--muted);margin-top:2px}
 button.copy{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;font-size:11px;padding:2px 7px;cursor:pointer;margin-left:4px}
 button.mic.small{padding:6px 12px;font-size:13px;margin-left:auto}
+button.mic.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:0}
+#ndinote{margin-top:8px}
 #fixedout{white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0 0 10px}
 @media (max-width:480px){.ws{margin-left:0}.samples{margin-left:0}.stats{margin-left:0;width:100%}h1{font-size:21px}}
 </style>
@@ -182,10 +184,12 @@ button.mic.small{padding:6px 12px;font-size:13px;margin-left:auto}
       <textarea id="doctext" placeholder="Paste anything: a chatbot answer, an email, a sales one-pager, a student's poster or essay… or drop a PDF / text file here (e.g. exported from Adobe Express)."></textarea>
       <div class="docbar">
         <button class="mic" id="docgo">🦖 Check every claim</button>
-        <label class="file">📎 Open PDF / text<input type="file" id="file" accept=".pdf,.txt,.md,.csv" hidden></label>
+        <label class="file">📎 Open file<input type="file" id="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.pptx,.xlsx,.eml,.txt,.md,.csv" hidden></label>
+        <button class="mic small ghost" id="addkb" type="button" title="Add this document to the knowledge base. Its rules become agents automatically.">➕ Add to knowledge</button>
         <span class="samples">Try: <a href="#" data-sample="bot">🤖 chatbot answer</a> · <a href="#" data-sample="poster">🎓 student poster</a> · <a href="#" data-sample="email">✉️ customer email</a></span>
       </div>
     </div>
+    <div id="ndinote" class="sumtxt"></div>
     <div id="docsum"></div>
     <pre id="fixedout" hidden></pre>
     <div class="feed" id="docres"></div>
@@ -399,8 +403,21 @@ async function loadPdfJs(){
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   return window.pdfjsLib;
 }
+let lastFile = '';
 async function readFile(f){
-  const ta = document.getElementById('doctext');
+  const ta = document.getElementById('doctext'), note = document.getElementById('ndinote');
+  lastFile = f.name;
+  if (!/\.(txt|md|csv)$/i.test(f.name)) {
+    // PDFs, images (Adobe Express PNG/JPG exports), Word, PowerPoint, email: parse with NDI (OCR when needed)
+    ta.value = ''; note.textContent = `📄 Reading ${f.name} with NDI…`;
+    try {
+      const r = await fetch(API + '/api/parse?name=' + encodeURIComponent(f.name), {method:'POST', body: f}).then(r => r.json());
+      if (r.error) throw new Error(r.error);
+      ta.value = r.text;
+      note.innerHTML = `📄 Parsed by <b>NDI</b> · ${r.pages||1} page${(r.pages||1)==1?'':'s'}${r.ocr?' · OCR':''} · ${(r.ms/1000).toFixed(1)} s${r.cost_usd?` · $${r.cost_usd}`:''}`;
+      return;
+    } catch(e) { note.textContent = '⚠️ NDI failed (' + e.message + '), trying in-browser reader…'; }
+  }
   if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf'){
     ta.value = 'Reading ' + f.name + '…';
     try{
@@ -415,6 +432,20 @@ async function readFile(f){
   } else { ta.value = await f.text(); }
 }
 document.getElementById('file').addEventListener('change', e => e.target.files[0] && readFile(e.target.files[0]));
+document.getElementById('addkb').addEventListener('click', async e => {
+  const text = document.getElementById('doctext').value.trim(), note = document.getElementById('ndinote'); if (!text) return;
+  const btn = e.target; btn.disabled = true; btn.textContent = '➕ Adding…';
+  try {
+    const r = await fetch(API + '/api/kb/add', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text, name: lastFile || 'pasted-document.md', ws: wsSel.value})}).then(r => r.json());
+    if (r.error) throw new Error(r.error);
+    KB.workspaces = r.workspaces; showKb();
+    note.innerHTML = `✅ Added <b>${r.chunks_added}</b> section${r.chunks_added==1?'':'s'} to ${wsSel.options[wsSel.selectedIndex].text}` +
+      (r.new_agents.length ? ` · 🆕 <b>${r.new_agents.length}</b> new policy agent${r.new_agents.length==1?'':'s'} learned from it: ` + r.new_agents.map(x => `“${esc(x.slice(0,70))}”`).join(', ') : '');
+    refreshPanel();
+  } catch(err) { note.textContent = '⚠️ ' + err.message; }
+  btn.disabled = false; btn.textContent = '➕ Add to knowledge';
+});
 const drop = document.getElementById('drop');
 ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));

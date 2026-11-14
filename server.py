@@ -23,11 +23,72 @@ def add_chunk(source, title, text, url="", date="", kind="doc"):
                    "text": text[:1200], "url": url, "date": date, "kind": kind, "ws": LOADING_WS[0]})
 
 
+NACE = "https://console.nace.ai"
+
+
+def ndi_parse(data, name):
+    """NDI (Nace Document Intelligence, 'Perception'): upload a file, parse it to markdown (OCR when needed).
+    Handles PDF, images, Word, PowerPoint, Excel, email. Same key and balance as Drex."""
+    import uuid
+    key = os.environ.get("NACE_API_KEY") or open(os.path.join(ROOT, ".nace_key")).read().strip()
+    auth = {"Authorization": "Bearer " + key}
+    def jpost(url, body):
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                     headers={**auth, "Content-Type": "application/json"})
+        return json.load(urllib.request.urlopen(req, timeout=120))
+    t = time.time()
+    g = jpost(NACE + "/v1/documents/upload-grants", {"path": name, "ttl_seconds": 600})
+    bnd = uuid.uuid4().hex
+    body = (f"--{bnd}\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n{json.dumps({'path': name})}\r\n"
+            f"--{bnd}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n"
+            f"Content-Type: application/octet-stream\r\n\r\n").encode() + data + f"\r\n--{bnd}--\r\n".encode()
+    up = urllib.request.Request(g["upload_url"], data=body, method="POST",
+                                headers={"X-Upload-Token": g["token"], "Content-Type": f"multipart/form-data; boundary={bnd}"})
+    fid = json.load(urllib.request.urlopen(up, timeout=120))["result"]["file"]["file_id"]
+    j = jpost(NACE + "/v1/documents/parse?wait_seconds=90",
+              {"source": {"type": "workspace_file", "workspace_id": g["workspace_id"], "file_id": fid},
+               "output": {"formats": ["markdown"]}})
+    if j.get("status") != "succeeded":
+        raise RuntimeError(f"NDI parse {j.get('status')}: {str(j.get('error'))[:200]}")
+    doc = j["result"]["document"]
+    md = doc.get("markdown") or doc.get("text") or ""
+    if not md and doc.get("content_url"):
+        md = urllib.request.urlopen(doc["content_url"], timeout=60).read().decode(errors="ignore")
+    md = re.sub(r"^-{3}\s*Page \d+\s*-{3}\s*$", "", md, flags=re.M).strip()
+    return {"text": md, "pages": doc.get("page_count"), "ocr": j["result"].get("ocr_applied"),
+            "cost_usd": (j.get("cost") or {}).get("total_usd"), "ms": round((time.time() - t) * 1000)}
+
+
 def parse_pdf(path):
-    """PDF -> text. Replace with NDI at the event (Nace's document parser)."""
+    """PDF/scans/office files -> text via NDI; falls back to pdftotext."""
+    try:
+        return ndi_parse(open(path, "rb").read(), os.path.basename(path))["text"]
+    except Exception as e:
+        print(f"  NDI parse failed for {path}: {e}")
     if shutil.which("pdftotext"):
         return subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, text=True).stdout
     return ""
+
+
+def add_document(text, name, ws):
+    """Add a parsed document to a workspace's knowledge base, then re-derive policy agents from its rules."""
+    n0 = len(CHUNKS)
+    LOADING_WS[0] = ws
+    title = (re.search(r"^#\s+(.+)$", text, re.M) or [None, name])[1]
+    parts = re.split(r"\n(?=#{2,3}\s)", text)
+    if len(parts) == 1:
+        paras, buf, parts = re.split(r"\n\s*\n", text), "", []
+        for p in paras:
+            if len(buf) + len(p) > 800 and buf:
+                parts.append(buf); buf = ""
+            buf += "\n" + p
+        if buf: parts.append(buf)
+    for p in parts:
+        h = re.match(r"#{1,3}\s+(.+)", p.strip())
+        body = re.sub(r"^#{1,3}\s+.+\n?", "", p.strip())
+        add_chunk(name, f"{title} — {h.group(1)}" if h and h.group(1) != title else title, body, kind="file")
+    LOADING_WS[0] = "company"
+    return len(CHUNKS) - n0
 
 
 def load_folder(folder):
@@ -349,7 +410,7 @@ def rules_from_docs():
                 seen.add(s)
                 out.append({"id": f"rule{len(out)}", "icon": "⚖️", "name": short_name(s), "type": "rule",
                             "rule": s, "source": "docs", "doc": c["source"], "ws": c["ws"]})
-    return out[:20]
+    return out[:40]
 
 
 def load_agents():
@@ -471,7 +532,7 @@ def analyze_live(text, previous="", ws="company"):
     if doc_ok and (kind in ("claim", "promise") or (kind == "question" and has_learned)):
         jobs["fact"] = ex.submit(verify, text, cands, a["doc"])
     # router: Drex already classified the sentence; promises and claims go to every doc-rule agent in this workspace
-    rules = [r for r in AGENTS if r["type"] == "rule" and r.get("ws", ws) == ws][:20] if kind in ("claim", "promise") else []
+    rules = [r for r in AGENTS if r["type"] == "rule" and r.get("ws", ws) == ws][:30] if kind in ("claim", "promise") else []
     if rules:
         rq = {r["id"]: {"type": "noul", "instructions": f"Company rule: \"{r['rule']}\" Does what the speaker said break this rule, for example by promising, offering or stating something the rule does not allow?"} for r in rules}
         jobs["rules"] = ex.submit(drex, {"speaker_just_said": text}, rq)
@@ -596,9 +657,38 @@ class H(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset"):
+        route = self.path.split("?")[0]
+        if route == "/api/parse":  # raw file bytes -> NDI -> text
+            size = int(self.headers.get("Content-Length", 0))
+            if size > 25 * 1024 * 1024:
+                return self._send(413, {"error": "File too large for the demo (25 MB max)"})
+            from urllib.parse import parse_qs, urlparse
+            name = (parse_qs(urlparse(self.path).query).get("name") or ["upload.pdf"])[0]
+            name = re.sub(r"[^\w.\- ]", "_", os.path.basename(name))[:120] or "upload.pdf"
+            data = self.rfile.read(size)
+            STATS["ndi_pages"] = STATS.get("ndi_pages", 0)
+            if STATS["ndi_pages"] >= 300:
+                return self._send(429, {"error": "NDI page cap reached for this demo"})
+            try:
+                res = ndi_parse(data, name)
+            except Exception as e:
+                return self._send(502, {"error": f"NDI could not parse {name}: {e}"})
+            STATS["ndi_pages"] += res.get("pages") or 1
+            return self._send(200, res)
+        if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        if route == "/api/kb/add":  # add a parsed document to the knowledge base; its rules become agents
+            text, name = (body.get("text") or "")[:200000], re.sub(r"[^\w.\- ]", "_", body.get("name") or "uploaded")[:120]
+            ws = body.get("ws") or "company"
+            if len(text) < 40:
+                return self._send(400, {"error": "Nothing to add: the document is empty"})
+            with LOCK:
+                before = sum(1 for a in AGENTS if a["source"] == "docs")
+                n = add_document(text, name, ws); build_index(); load_agents()
+                new_rules = [a for a in AGENTS if a["source"] == "docs" and a.get("doc") == name]
+            return self._send(200, {"chunks_added": n, "ws": ws, "new_agents": [a["rule"] for a in new_rules],
+                                    "workspaces": {w: len(I["chunks"]) for w, I in INDEXES.items()}})
         ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
         now = time.time()
         hits = [t for t in RATE[ip] if now - t < 60]
