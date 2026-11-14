@@ -334,7 +334,7 @@ function render(r){
   const el=document.createElement('div');el.className='card '+cls;
   el.innerHTML=`
     <div class="head"><span class="badge">${badge}</span>${r.replayed?'<span class="srcb custom" title="Drex API unreachable: showing the real answer recorded earlier for this exact line">replayed</span>':''}<span class="meta">${hits.length+(d?1:0)} agent${hits.length+(d?1:0)==1?'':'s'} · Drex ${ms} ms${conf?` · ${Math.round(conf*100)}% sure`:''}</span></div>
-    ${r.kind!=='page'?`<div class="said"><span class="lbl">${who}</span><q>${esc(r.text)}</q></div>`:''}
+    ${r.kind!=='page'?`<div class="said"><span class="lbl">${who}</span><q>${esc(r.text)}</q>${r.heard?`<div class="sumtxt">🎙️ heard: “${esc(r.heard)}”</div>`:''}</div>`:''}
     ${r.written?`<div class="written">✍️ ${esc(r.written.text)}<div class="sumtxt">written by ${esc(r.written.by)} · ${r.written.ms} ms · ${esc(r.written.why)}</div></div>`:''}
     ${r.fix&&!r.written?`<div class="fix">✏️ <b>Correct:</b> ${esc(r.fix)}</div>`:''}
     ${d?`<div class="src"><span class="lbl">${srcLbl}</span>
@@ -413,11 +413,11 @@ document.getElementById('slackconnect').addEventListener('click', async () => {
   note.textContent = r.ok ? '✅ Slack connected.' : '⚠️ ' + r.error; if (r.ok) document.getElementById('slackurl').value = '';
 });
 
-async function analyze(text, mode='speech'){
+async function analyze(text, mode='speech', alternatives=[]){
   text=text.trim(); if(!text) return;
   try{
     const r=await fetch(API+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text,mode,previous:history.slice(-4).join(' '),ws:wsSel.value,llm_mode:document.getElementById('llmmode').value})}).then(r=>r.json());
+      body:JSON.stringify({text,mode,alternatives,previous:history.slice(-4).join(' '),ws:wsSel.value,llm_mode:document.getElementById('llmmode').value})}).then(r=>r.json());
     refreshLlm();
     if(r.error) throw new Error(r.error);
     render(r);
@@ -433,12 +433,12 @@ const mic = document.getElementById('mic'); let rec=null, listening=false;
 if(!SR){mic.disabled=true;mic.textContent='🎙️ Mic needs Chrome';}
 mic.addEventListener('click',()=>{
   if(listening){listening=false;rec&&rec.stop();mic.classList.remove('on');mic.textContent='🎙️ Start listening';live.textContent='';return;}
-  rec=new SR();rec.continuous=true;rec.interimResults=true;rec.lang='en-US';
+  rec=new SR();rec.continuous=true;rec.interimResults=true;rec.lang='en-US';rec.maxAlternatives=5;
   rec.onresult=e=>{
     let interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
       const res=e.results[i];
-      if(res.isFinal){live.textContent='';analyze(res[0].transcript);} else interim+=res[0].transcript;
+      if(res.isFinal){live.textContent='';analyze(res[0].transcript,'speech',[...res].slice(1).map(a=>a.transcript));} else interim+=res[0].transcript;
     }
     if(interim) live.textContent='… '+interim;
   };

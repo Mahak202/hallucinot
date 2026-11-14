@@ -524,7 +524,9 @@ def write_line(text, out):
             "outdated": "This changed earlier in the meeting. In one short sentence, say what is true now, using only the source.",
             "learned_update": "Summarize this new decision in one short sentence.",
             }.get(out.get("status"), "If the source helps, write one short helpful sentence using only the source. Otherwise reply NONE.")
-    return llm(f"{task}\nSpeaker said: \"{text}\"\nSource: {src}\nReply with the sentence only, no preamble.")
+    return llm(f"{task}\nSpeaker said (speech-to-text, may contain misheard words): \"{text}\"\nSource: {src}\n"
+               "Use only names and terms that appear in the source; never repeat a name from the speaker that the source does not contain. "
+               "Reply with the sentence only, no preamble.")
 
 
 def llm_only(text, cands):
@@ -536,13 +538,61 @@ def llm_only(text, cands):
                f"Speaker said: \"{text}\"\n\nDocuments:\n{docs}")
 
 
-def analyze_live(text, previous="", ws="company", llm_mode="drex"):
+NUMW = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
+        "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+        "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50",
+        "sixty": "60", "seventy": "70", "eighty": "80", "ninety": "90"}
+
+
+def normalize_spoken(t):
+    """General spoken-form cleanup so speech matches documents: 'quarter three' -> 'Q3', 'ninety nine point nine' -> '99.9'."""
+    t = re.sub(r"\bquarter (one|two|three|four|1|2|3|4)\b", lambda m: "Q" + {"one": "1", "two": "2", "three": "3", "four": "4"}.get(m.group(1), m.group(1)), t, flags=re.I)
+    def num(m):
+        words = m.group(0).lower().split()
+        out, i = "", 0
+        while i < len(words):
+            w = words[i]
+            if w == "point":
+                out += "."
+            elif w in NUMW:
+                v = NUMW[w]
+                if v.endswith("0") and len(v) == 2 and i + 1 < len(words) and words[i + 1] in NUMW and len(NUMW[words[i + 1]]) == 1:
+                    v = v[0] + NUMW[words[i + 1]]; i += 1
+                out += v
+            i += 1
+        return out
+    t = re.sub(r"\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|point)\b\s*){2,}",
+               lambda m: num(m) + " ", t, flags=re.I)
+    t = re.sub(r"\b(" + "|".join(k for k in NUMW if k != "oh") + r")\s+percent\b", lambda m: NUMW[m.group(1).lower()] + "%", t, flags=re.I)
+    t = re.sub(r"(\d)\s+percent\b", r"\1%", t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
+def pick_transcript(alternatives, ws):
+    """Speech engines mishear jargon. Pick the alternative that best matches this knowledge base's vocabulary."""
+    I = INDEXES.get(ws)
+    if not I or len(alternatives) < 2:
+        return alternatives[0] if alternatives else ""
+    def fit(a):
+        toks = set(tok(a))
+        known = [w for w in toks if w in I["df"]]
+        return sum(math.log(1 + I["N"] / (1 + I["df"][w])) for w in known) - 0.5 * (len(toks) - len(known))
+    return max(alternatives, key=fit)
+
+
+def analyze_live(text, previous="", ws="company", llm_mode="drex", alternatives=None):
     """Multi-agent pass over one spoken sentence. Drex makes every call."""
     t0 = time.time()
     text = text.strip()
     m = re.match(r"^([A-Z][a-z]{1,15}):\s*(.+)$", text)
     speaker, text = (m.group(1), m.group(2)) if m else ("", text)
+    heard = text
+    if alternatives:
+        text = pick_transcript([text] + [a for a in alternatives if a and a != text], ws)
+    text = normalize_spoken(text)
     out = {"mode": "speech", "text": text[:300], "speaker": speaker, "show": False, "agents": [], "drex_ms": []}
+    if text.lower() != heard.lower():
+        out["heard"] = heard[:300]
     if not text:
         return out
     cands = search(text + " " + previous[-200:], ws=ws)
@@ -1353,7 +1403,8 @@ class H(BaseHTTPRequestHandler):
                 remember_replay(rkey, res)
                 return self._send(200, res)
             if body.get("mode", "speech") == "speech":
-                res = analyze_live(body.get("text", ""), body.get("previous", ""), ws, body.get("llm_mode") or "drex")
+                res = analyze_live(body.get("text", ""), body.get("previous", ""), ws, body.get("llm_mode") or "drex",
+                                   [str(a)[:300] for a in (body.get("alternatives") or [])][:5])
             else:
                 res = analyze(body.get("text", ""), body.get("mode", "speech"), body.get("previous", ""), ws)
         except Exception as e:  # keep the demo alive: fall back to a recorded real answer if we have one
