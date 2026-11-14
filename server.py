@@ -133,7 +133,7 @@ def search(q, k=12, ws="company"):
 
 
 # ---------------------------------------------------------------- Drex
-KEY = os.environ.get("NACE_API_KEY") or open(os.path.join(ROOT, ".nace_key")).read().strip()
+KEY = os.environ.get("NACE_API_KEY") or (open(os.path.join(ROOT, ".nace_key")).read().strip() if os.path.exists(os.path.join(ROOT, ".nace_key")) else "")
 
 
 def drex(state, questions):
@@ -371,7 +371,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--folder", action="append", help="folder to index; use name=PATH to put it in a workspace (repeatable)")
     ap.add_argument("--repo", action="append", help="GitHub repo owner/name to index PRs from (repeatable)")
-    ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8787)))
+    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     args = ap.parse_args()
     print("Building knowledge base:")
     folders = args.folder or [f"company={os.path.join(ROOT, 'kb', 'company')}", f"classroom={os.path.join(ROOT, 'kb', 'classroom')}"]
@@ -388,4 +389,4 @@ if __name__ == "__main__":
         load_repo(r)
     build_index()
     print(f"Ready: {len(CHUNKS)} chunks. Open http://localhost:{args.port}")
-    ThreadingHTTPServer(("127.0.0.1", args.port), H).serve_forever()
+    ThreadingHTTPServer((args.host, args.port), H).serve_forever()
