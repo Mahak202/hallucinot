@@ -805,7 +805,7 @@ def post_slack(text):
 # ---------------------------------------------------------------- judge mode
 # Load each team's public GitHub repo as its own knowledge section, detect which team is presenting
 # from what they say (a Drex decision), and check every claim against that team's own materials.
-JUDGE = {"teams": [], "current": None, "scores": {}}
+JUDGE = {"teams": [], "current": None, "scores": {}, "ranking": [], "phase": "setup", "last_live": 0}
 
 
 def gh_get(path):
@@ -920,7 +920,9 @@ def parse_submissions(raw):
 
 def import_submission(sub):
     name = sub["team"] or sub["project"]
-    one = (sub["project"] + ": " if sub["project"] else "") + " ".join(sub["explanation"].split()[:35])
+    clean = re.sub(r"[*_`#>]+", "", sub["explanation"])
+    clean = re.sub(r"^\s*[-•]\s*", "", re.sub(r"(What it does|How we used Nace):?\s*", "", clean), flags=re.M)
+    one = (sub["project"] + ": " if sub["project"] else "") + " ".join(clean.split()[:28])
     repo = sub["repo"] if "github.com" in sub["repo"] else ""
     team = register_team(name, one, repo)
     notes = []
@@ -941,6 +943,62 @@ def import_submission(sub):
         except Exception as e:
             notes.append(f"slides not readable ({str(e)[:60]}); upload the PDF instead")
     return {"team": team["name"], "sections": team.get("sections", 0), "notes": notes}
+
+
+# Official criteria from the Drexathon rules; every team is scored the same way.
+RUBRIC = [
+    ("track", "Track fit", "How well does the project fit its hackathon track (Apex Predator: Drex beats a frontier LLM with measured results; Swarm Intelligence: multi-agent with Drex making every agent's calls; Wildcard: most creative use of Drex)?"),
+    ("drex", "Drex usage", "How central and deep is the use of Drex (the Nace decision model) in what the project does?"),
+    ("intern", "Intern usage", "How much does the project use Intern, Nace's AI agent in Slack?"),
+    ("ndi", "NDI usage", "How much does the project use NDI (Nace Document Intelligence / Perception) to parse documents?"),
+    ("partners", "Partner tools", "How much does the project use partner tools: Adobe (Express, Firefly, Photoshop), DeepInfra or Keenable?"),
+    ("evidence", "Measured evidence", "How strong is the evidence: measured results, benchmarks, numbers or a working demo?"),
+    ("credibility", "Credibility on stage", "How well were the team's live claims backed by their own materials?"),
+]
+LEVELS = ["none", "weak", "moderate", "strong", "excellent"]
+
+
+def team_evidence(slug, k=10):
+    I = INDEXES.get(slug)
+    if not I:
+        return ""
+    chunks = sorted(I["chunks"], key=lambda c: (0 if "submission" in c["source"] else 1 if "slides" in c["source"] else 2))
+    return "\n".join(f"- {c['title']}: {c['text'][:350]}" for c in chunks[:k])
+
+
+def score_team(t):
+    sc = JUDGE["scores"].get(t["slug"], {})
+    live = (f"Live claims checked: {sc.get('claims', 0)}; backed by their materials: {sc.get('agree', 0)}; "
+            f"contradicted their materials: {sc.get('contradict', 0)}; not found in their materials: {sc.get('no_source', 0)}.")
+    state = {"team": t["name"], "project_summary": t.get("oneliner", ""), "public_repo": t.get("repo") or "none given",
+             "materials": team_evidence(t["slug"]), "live_demo": live}
+    qs = {key: {"type": "score", "criteria": LEVELS, "instructions": f"{q} Judge only from the evidence given; if there is no evidence, answer none."}
+          for key, _, q in RUBRIC}
+    r = drex(state, qs)
+    out = {}
+    for key, label, _ in RUBRIC:
+        a = r["answers"][key]
+        val = a.get("score")
+        if isinstance(val, str):
+            val = LEVELS.index(val) if val in LEVELS else 0
+        out[key] = {"label": label, "score": round(float(val or 0), 2), "confidence": round(a.get("confidence", 0), 2)}
+    if not sc.get("claims"):
+        out["credibility"]["score"] = None  # no live demo heard yet: don't count it
+    vals = [v["score"] for v in out.values() if v["score"] is not None]
+    total = round(100 * sum(vals) / (4 * len(vals)), 1) if vals else 0
+    return {"team": t["name"], "slug": t["slug"], "total": total, "criteria": out, "ms": r["_ms"]}
+
+
+def rank_teams():
+    JUDGE["phase"] = "scoring"
+    try:
+        with concurrent.futures.ThreadPoolExecutor(4) as ex:
+            results = list(ex.map(score_team, JUDGE["teams"]))
+    finally:
+        JUDGE["phase"] = "results"
+    results.sort(key=lambda x: -x["total"])
+    JUDGE["ranking"] = results
+    return results
 
 
 def judge_analyze(text, override=None):
@@ -967,6 +1025,7 @@ def judge_analyze(text, override=None):
             JUDGE["current"] = a["choice"]; out["switched"] = True
     cur = JUDGE["current"]
     out["team"] = cur
+    JUDGE["phase"], JUDGE["last_live"] = "live", time.time()
     if not cur:
         out["total_ms"] = round((time.time() - t0) * 1000)
         return out
@@ -1023,7 +1082,13 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/api/agents"):
             return self._send(200, agents_view())
         if self.path.startswith("/api/judge"):
-            return self._send(200, {"teams": JUDGE["teams"], "current": JUDGE["current"], "scores": JUDGE["scores"]})
+            phase = JUDGE["phase"]
+            if phase == "live" and time.time() - JUDGE["last_live"] > 90:
+                phase = "between"
+            return self._send(200, {"teams": JUDGE["teams"], "current": JUDGE["current"], "scores": JUDGE["scores"],
+                                    "ranking": JUDGE["ranking"], "phase": phase,
+                                    "rubric": [{"key": k, "label": l, "question": q} for k, l, q in RUBRIC],
+                                    "know": {t["slug"]: g for t in JUDGE["teams"] for g in [know_view().get(t["slug"], [])]}})
         if self.path.startswith("/api/llmstats"):
             return self._send(200, LLM_STATS)
         if self.path.startswith("/api/integrations"):
@@ -1062,7 +1127,7 @@ class H(BaseHTTPRequestHandler):
             STATS["ndi_pages"] += res.get("pages") or 1
             return self._send(200, res)
         if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add",
-                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register", "/api/judge/import"):
+                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register", "/api/judge/import", "/api/judge/score"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if route == "/api/judge/teams":
@@ -1077,6 +1142,11 @@ class H(BaseHTTPRequestHandler):
                 except Exception as e:
                     errors.append(f"{line.strip()[:60]}: {e}")
             return self._send(200, {"added": added, "errors": errors, "teams": JUDGE["teams"]})
+        if route == "/api/judge/score":
+            try:
+                return self._send(200, {"ranking": rank_teams(), "rubric": [{"key": k, "label": l, "question": q} for k, l, q in RUBRIC]})
+            except Exception as e:
+                return self._send(503, {"error": str(e)})
         if route == "/api/judge/import":
             try:
                 subs = parse_submissions(body.get("raw") or "")
