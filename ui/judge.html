@@ -72,6 +72,14 @@ header h1{line-height:1.15}
 .dropall.over{background:var(--green-bg);border-color:var(--green)}
 .dropall b{display:block;font-size:17px;margin:4px 0}
 details.addteam summary{cursor:pointer}
+.revwrap{overflow-x:auto;margin-top:8px}
+table.rev{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+table.rev th{text-align:left;color:var(--muted);font-weight:600;padding:4px;border-bottom:1px solid var(--line)}
+table.rev td{padding:4px;vertical-align:top;border-bottom:1px solid var(--line)}
+table.rev input,table.rev textarea{font-size:12px;padding:5px 6px}
+table.rev textarea{min-height:44px}
+table.rev input[type=checkbox]{width:auto}
+tr.dim td{opacity:.6}
 .addteam{background:var(--bg);border:1px dashed var(--line);border-radius:12px;padding:12px}
 code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
 </style>
@@ -117,6 +125,12 @@ code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
           <div class="muted">CSV, Excel, JSON, PDF, Word, even a screenshot. Tables are read directly or by NDI; anything messy, the DeepInfra LLM extracts the teams. Repos and slide links are pulled in automatically.</div>
           <div id="anynote" class="muted" style="margin-top:6px"></div>
         </label>
+        <div id="review" hidden>
+          <div class="row" style="justify-content:space-between;margin-top:10px"><b>🔎 Review before importing</b><span class="muted" id="revhow"></span></div>
+          <div class="muted">Drex checked every row. Fix or fill in anything, untick rows that aren't teams, then import.</div>
+          <div class="revwrap"><table class="rev"><thead><tr><th></th><th>Check</th><th>Team</th><th>Project</th><th>Explanation</th><th>Repo</th><th>Slides link</th></tr></thead><tbody id="revbody"></tbody></table></div>
+          <div class="row" style="margin-top:8px"><button id="revgo">Import selected teams</button><button class="ghost" id="revcancel" type="button">Cancel</button><span id="revnote" class="muted"></span></div>
+        </div>
         <details class="addteam" style="margin-top:12px"><summary><b>➕ Add a team by hand</b> <span class="muted">(if one is missing)</span></summary>
           <div class="two" style="margin-top:6px">
             <div><label>Team name *</label><input id="m-name" placeholder="e.g. Team Rocket"></div>
@@ -279,15 +293,36 @@ $('bulkgo')?.addEventListener('click', async () => {
 });
 async function ingestFile(f){
   const note = $('anynote'); note.className = 'muted';
-  note.textContent = `Reading ${f.name}… (NDI and repos can take a few seconds per team)`;
+  note.textContent = `Reading ${f.name}… and asking Drex to check each row`;
   try {
-    const r = await fetch(API + '/api/judge/ingest?name=' + encodeURIComponent(f.name), {method:'POST', body: f}).then(r => r.json());
+    const r = await fetch(API + '/api/judge/ingest?preview=1&name=' + encodeURIComponent(f.name), {method:'POST', body: f}).then(r => r.json());
     if (r.error) throw new Error(r.error);
-    note.className = 'ok';
-    note.innerHTML = `✅ ${r.imported.length} teams imported from ${esc(f.name)} (${esc(r.how)})` + (r.errors.length ? `<br><span class="err">⚠️ ${esc(r.errors.join('; '))}</span>` : '');
-    refresh();
+    note.textContent = `Found ${r.rows.length} rows in ${f.name}. Review them below.`;
+    $('revhow').textContent = r.how;
+    const F = ['team','project','explanation','repo','slides'];
+    $('revbody').innerHTML = r.rows.map((x, i) => {
+      const bad = x.is_team < 0.5, warn = x.missing.length || (x.explains !== null && x.explains < 0.5);
+      const chk = bad ? `<span class="chip r" title="Drex: ${Math.round(x.is_team*100)}% sure this is a team">🤔 not a team?</span>`
+                : warn ? `<span class="chip y" title="${esc(x.missing.join(', '))}">⚠️ ${esc(x.missing.join(', ') || 'explanation unclear')}</span>`
+                : '<span class="chip g">✅ ready</span>';
+      return `<tr data-i="${i}" class="${bad?'dim':''}"><td><input type="checkbox" class="revsel" ${bad?'':'checked'}></td><td>${chk}</td>` +
+        F.map(k => k === 'explanation' ? `<td><textarea data-k="${k}">${esc(x[k]||'')}</textarea></td>` : `<td><input data-k="${k}" value="${esc(x[k]||'')}" placeholder="${k==='repo'?'https://github.com/…':k==='slides'?'https://… (optional)':''}"></td>`).join('') + '</tr>';
+    }).join('');
+    $('review').hidden = false; $('revnote').textContent = '';
   } catch(e) { note.className = 'err'; note.textContent = '⚠️ ' + e.message; }
 }
+$('revcancel').addEventListener('click', () => { $('review').hidden = true; $('anynote').textContent = ''; });
+$('revgo').addEventListener('click', async () => {
+  const rows = [...document.querySelectorAll('#revbody tr')].filter(tr => tr.querySelector('.revsel').checked)
+    .map(tr => Object.fromEntries([...tr.querySelectorAll('[data-k]')].map(el => [el.dataset.k, el.value.trim()])));
+  if (!rows.length) { $('revnote').textContent = 'Nothing selected.'; return; }
+  $('revnote').textContent = `Importing ${rows.length} teams (repos and slides take a few seconds each)…`;
+  const r = await post('/api/judge/import_rows', {rows});
+  $('review').hidden = true;
+  $('anynote').className = 'ok';
+  $('anynote').innerHTML = `✅ ${r.imported.length} teams imported` + r.imported.filter(x => x.notes.length).map(x => `<br>· ${esc(x.team)}: ${esc(x.notes.join(', '))}`).join('') + (r.errors.length ? `<br><span class="err">⚠️ ${esc(r.errors.join('; '))}</span>` : '');
+  refresh();
+});
 $('anyfile').addEventListener('change', e => { if (e.target.files[0]) ingestFile(e.target.files[0]); e.target.value = ''; });
 ['dragover','dragenter'].forEach(ev => $('dropall').addEventListener(ev, e => { e.preventDefault(); $('dropall').classList.add('over'); }));
 ['dragleave','drop'].forEach(ev => $('dropall').addEventListener(ev, e => { e.preventDefault(); $('dropall').classList.remove('over'); }));

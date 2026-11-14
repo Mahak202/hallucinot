@@ -968,6 +968,19 @@ def ingest_any(data, name):
     return subs, how + " + teams extracted by DeepInfra LLM"
 
 
+def review_submission(sub):
+    """Drex sanity-checks one extracted record before anything is imported."""
+    r = drex({"record": sub},
+             {"is_team": {"type": "noul", "instructions": "This row comes from a list of hackathon submissions, where each normal row names a team and/or the project it built. Is this row such a team entry, rather than a note, a comment, a section header, a total or an empty row?"},
+              "explains": {"type": "noul", "instructions": "Does the explanation describe what the project actually does?"}})
+    a = r["answers"]
+    missing = [k for k in ("team", "project", "explanation") if not sub.get(k)]
+    if sub.get("repo") and "github.com" not in sub["repo"]:
+        missing.append("repo (not a GitHub link)")
+    return {**sub, "is_team": round(a["is_team"]["noul"], 2),
+            "explains": round(a["explains"]["noul"], 2) if sub.get("explanation") else None, "missing": missing}
+
+
 def import_submission(sub):
     name = sub["team"] or sub["project"]
     clean = re.sub(r"[*_`#>]+", "", sub["explanation"])
@@ -1173,6 +1186,10 @@ class H(BaseHTTPRequestHandler):
                 return self._send(502, {"error": f"Could not read {name}: {e}"})
             if not subs:
                 return self._send(400, {"error": f"Read {name} ({how}) but found no teams in it"})
+            if "preview=1" in self.path:  # review step: nothing is imported yet
+                with concurrent.futures.ThreadPoolExecutor(6) as ex:
+                    rows = list(ex.map(review_submission, subs))
+                return self._send(200, {"how": how, "rows": rows})
             done, errors = [], []
             with concurrent.futures.ThreadPoolExecutor(4) as ex:
                 for sub, fut in [(x, ex.submit(import_submission, x)) for x in subs]:
@@ -1199,7 +1216,7 @@ class H(BaseHTTPRequestHandler):
             STATS["ndi_pages"] += res.get("pages") or 1
             return self._send(200, res)
         if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add",
-                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register", "/api/judge/import", "/api/judge/score"):
+                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register", "/api/judge/import", "/api/judge/score", "/api/judge/import_rows"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if route == "/api/judge/teams":
@@ -1214,6 +1231,17 @@ class H(BaseHTTPRequestHandler):
                 except Exception as e:
                     errors.append(f"{line.strip()[:60]}: {e}")
             return self._send(200, {"added": added, "errors": errors, "teams": JUDGE["teams"]})
+        if route == "/api/judge/import_rows":  # import the rows the user reviewed and fixed
+            done, errors = [], []
+            rows = [{k: str(r.get(k) or "").strip() for k in ("team", "project", "explanation", "repo", "slides", "demo")}
+                    for r in (body.get("rows") or [])]
+            with concurrent.futures.ThreadPoolExecutor(4) as ex:
+                for sub, fut in [(x, ex.submit(import_submission, x)) for x in rows if x["team"] or x["project"]]:
+                    try:
+                        done.append(fut.result())
+                    except Exception as e:
+                        errors.append(f"{sub['team'] or sub['project']}: {e}")
+            return self._send(200, {"imported": done, "errors": errors, "teams": JUDGE["teams"]})
         if route == "/api/judge/score":
             try:
                 return self._send(200, {"ranking": rank_teams(), "rubric": [{"key": k, "label": l, "question": q} for k, l, q in RUBRIC]})
