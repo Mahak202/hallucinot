@@ -612,6 +612,25 @@ def analyze_live(text, previous="", ws="company"):
     return out
 
 
+def know_view():
+    """What each workspace knows, grouped by source, for the 'What I know' box."""
+    out = {}
+    for ws, I in INDEXES.items():
+        groups = collections.OrderedDict()
+        for c in I["chunks"]:
+            if c["kind"] == "pr":
+                key, label, icon = "pr:" + c["source"].split(" PR #")[0], c["source"].split(" PR #")[0] + " pull requests", "🧑‍💻"
+            elif c["kind"] == "learned":
+                key, label, icon = "learned", "Learned in meetings", "🧠"
+            else:
+                key, icon = "file:" + c["source"], "📄"
+                label = re.sub(r"\s*\((fictional demo data|demo course notes)\)", "", c["title"].split(" — ")[0])
+            g = groups.setdefault(key, {"icon": icon, "label": label, "count": 0})
+            g["count"] += 1
+        out[ws] = list(groups.values())
+    return out
+
+
 def agents_view():
     return {"agents": [{**{k: v for k, v in x.items() if k in ("id", "icon", "name", "type", "rule", "source", "doc")},
                         **AGENT_STATS[x["id"]]} for x in AGENTS],
@@ -646,7 +665,7 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/api/kb"):
             by = collections.Counter(c["kind"] for c in CHUNKS)
             wss = {ws: len(I["chunks"]) for ws, I in INDEXES.items()}
-            return self._send(200, {"chunks": len(CHUNKS), "by_kind": by, "workspaces": wss,
+            return self._send(200, {"chunks": len(CHUNKS), "by_kind": by, "workspaces": wss, "know": know_view(),
                                     "sources": sorted({c["source"].split(" PR #")[0] for c in CHUNKS})[:50], "stats": STATS})
         path = self.path.split("?")[0]
         f = os.path.join(ROOT, "ui", "index.html" if path in ("/", "") else path.lstrip("/"))
