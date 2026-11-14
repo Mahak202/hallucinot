@@ -58,4 +58,17 @@ Team: Harsh · Mahak
 **Same accuracy, about 6× faster, about 500× cheaper.** That's what makes checking *every sentence* by *many agents* possible.
 When unsure, Drex said "none" instead of guessing: a hallucination detector that doesn't hallucinate.
 
+### Drex as System 1, the LLM as System 2
+Same 12-line meeting, two designs (DeepInfra Llama 3.3 70B as the writer):
+
+| | **Drex decides when the LLM writes** | LLM on every sentence |
+|---|---|---|
+| LLM calls | **5 / 12** (58% fewer) | 12 / 12 |
+| LLM cost | **~7× lower** | baseline |
+| Discount-policy break caught | ✅ | ❌ |
+| Leaked API key caught | ✅ | ❌ |
+| Action item logged | ✅ | ❌ |
+
+*Drex doesn't replace the big model. It decides when the big model is worth calling, and it catches what the big model misses.*
+
 **Content Credentials prove who made it. Hallucinot proves what it says is true.**

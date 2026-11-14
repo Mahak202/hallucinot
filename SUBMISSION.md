@@ -29,4 +29,6 @@ Fill the form at nace.ai/drexathon/submit with this. Adjust the wording to match
 
 **Benchmark (Track 1 evidence):** 50 meeting lines against 300 real pallets/flask PRs: Drex 47/50 vs Claude Opus 5.5 47/50. Median 0.38 s vs 2.2 s, about 500× cheaper per decision. All misses came from the keyword search step, not the model. When the right source wasn't among the candidates, Drex mostly answered "none"; Claude picked a wrong PR.
 
+**System 1 / System 2 (DeepInfra):** Drex's own decisions (it found the source for a question, judged a statement wrong or outdated, or heard an explicit request) trigger a DeepInfra Llama 3.3 70B call that writes one grounded sentence. On the same 12-line meeting, Drex-routed used 5 LLM calls vs 12 for LLM-on-every-sentence (58% fewer, about 7× lower LLM cost). The LLM-only design missed the discount-policy break, the leaked API key and the action item, all of which Drex caught. Per-sentence time was similar (2.0 s vs 1.7 s), because the Drex design runs a full agent team on every line. Reproduce with `eval/s1_vs_s2.py`.
+
 **Honest limits:** demo data is fictional (Quokka Analytics, Bio 101 notes) plus a public repo. Retrieval is keyword-based. Learning happens in memory per session.

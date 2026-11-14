@@ -486,7 +486,51 @@ def negotiate(statement, rule_text, fact_doc):
     return a["choice"], round(a.get("confidence", 0), 2), r["_ms"]
 
 
-def analyze_live(text, previous="", ws="company"):
+LLM_NAME = "DeepInfra · Llama 3.3 70B"
+LLM_STATS = {}
+
+
+def llm_stats(mode):
+    return LLM_STATS.setdefault(mode, {"sentences": 0, "llm_calls": 0, "llm_ms": 0, "llm_cost": 0.0, "total_ms": 0})
+
+
+def llm(prompt, max_tokens=120):
+    """System 2: DeepInfra-hosted LLM. Returns (text, ms, cost_usd)."""
+    key = secret(".deepinfra_key", "DEEPINFRA_API_KEY")
+    if not key:
+        raise RuntimeError("No DeepInfra key")
+    t = time.time()
+    req = urllib.request.Request("https://api.deepinfra.com/v1/openai/chat/completions",
+                                 data=json.dumps({"model": os.environ.get("DEEPINFRA_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+                                                  "max_tokens": max_tokens, "temperature": 0.1,
+                                                  "messages": [{"role": "user", "content": prompt}]}).encode(),
+                                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+    d = json.load(urllib.request.urlopen(req, timeout=40))
+    return d["choices"][0]["message"]["content"].strip(), round((time.time() - t) * 1000), float((d.get("usage") or {}).get("estimated_cost") or 0)
+
+
+def write_line(text, out):
+    """System 2 writes one grounded sentence. Drex already picked the source and the verdict."""
+    doc = out.get("doc")
+    src = f"{doc['title']}: {doc['text'][:900]}" if doc else "(no source document)"
+    task = {"context": "Answer the speaker's question in one short sentence, using only the source.",
+            "contradict": "The speaker said something wrong. Rewrite what they said as one short, correct sentence, using only the source.",
+            "outdated": "This changed earlier in the meeting. In one short sentence, say what is true now, using only the source.",
+            "learned_update": "Summarize this new decision in one short sentence.",
+            }.get(out.get("status"), "If the source helps, write one short helpful sentence using only the source. Otherwise reply NONE.")
+    return llm(f"{task}\nSpeaker said: \"{text}\"\nSource: {src}\nReply with the sentence only, no preamble.")
+
+
+def llm_only(text, cands):
+    """Baseline: no Drex. The LLM looks at every sentence and decides and writes on its own."""
+    docs = "\n".join(f"[{i+1}] {cand_label(c)}" for i, c in enumerate(cands[:6])) or "(none)"
+    return llm("You are a live meeting assistant. Read what the speaker just said and the company documents below. "
+               "If a document answers, corrects or adds something important about it, reply with ONE short helpful sentence "
+               "(an answer or a correction). If nothing is worth saying (small talk, irrelevant), reply exactly NONE.\n\n"
+               f"Speaker said: \"{text}\"\n\nDocuments:\n{docs}")
+
+
+def analyze_live(text, previous="", ws="company", llm_mode="drex"):
     """Multi-agent pass over one spoken sentence. Drex makes every call."""
     t0 = time.time()
     text = text.strip()
@@ -496,6 +540,17 @@ def analyze_live(text, previous="", ws="company"):
     if not text:
         return out
     cands = search(text + " " + previous[-200:], ws=ws)
+    if llm_mode == "always":
+        st = llm_stats("always")
+        try:
+            w, ms, cost = llm_only(text, cands)
+        except Exception as e:
+            out["written_error"] = str(e); return out
+        st["sentences"] += 1; st["llm_calls"] += 1; st["llm_ms"] += ms; st["llm_cost"] += cost
+        out.update(kind="llm", show=w.strip().upper() != "NONE",
+                   written={"text": w, "ms": ms, "cost": cost, "by": LLM_NAME, "why": "LLM called on every sentence (no Drex)"})
+        out["total_ms"] = round((time.time() - t0) * 1000); st["total_ms"] += out["total_ms"]
+        return out
     customs = [a for a in AGENTS if a["source"] == "custom"]
     state = {"earlier_in_conversation": previous[-400:], "speaker_just_said": text}
     qs = {"kind": {"type": "choice", "instructions": "What did the speaker just do?", "criteria": {
@@ -508,6 +563,8 @@ def analyze_live(text, previous="", ws="company"):
             qs[a["id"]] = {"type": "noul", "instructions": a["rule"]}
     for a in customs:
         qs[a["id"]] = {"type": "noul", "instructions": a["rule"]}
+    qs["draft_request"] = {"type": "noul", "instructions":
+        "Is the speaker explicitly asking for something to be written, drafted, summarized or explained in words?"}
     if cands:
         crit = {c["id"]: cand_label(c) for c in cands}
         crit["none"] = "None of these documents is about it"
@@ -613,6 +670,24 @@ def analyze_live(text, previous="", ws="company"):
         if out.get("status") in ("contradict", "outdated", "agree", "context", "agree_new"):
             AGENT_STATS["fact" if out["status"] != "context" else "suggest"]["fired"] += 1
     out["agents"] = hits
+    st = llm_stats("drex")
+    st["sentences"] += 1
+    # Drex's own decisions decide whether System 2 is needed: a question it found a source for,
+    # a statement it judged wrong or outdated, or an explicit request to write something.
+    reason = ("Drex found the source for a question" if out.get("status") == "context" else
+              "Drex judged the statement wrong" if out.get("status") == "contradict" else
+              "Drex saw it changed today" if out.get("status") == "outdated" else
+              "Drex heard a request to write something" if p("draft_request") > 0.6 else "")
+    out["needs_writing"] = reason
+    if reason:
+        try:
+            w, ms, cost = write_line(text, out)
+            if w.strip().upper() != "NONE":
+                out["written"] = {"text": w, "ms": ms, "cost": cost, "by": LLM_NAME,
+                                  "why": reason}
+            st["llm_calls"] += 1; st["llm_ms"] += ms; st["llm_cost"] += cost
+        except Exception as e:
+            out["written_error"] = str(e)
     with LOCK:
         SESSION.append({"t": time.strftime("%H:%M"), "speaker": speaker, "text": text, "status": out.get("status"),
                         "fix": out.get("fix"), "source": (out.get("doc") or {}).get("title"),
@@ -620,6 +695,7 @@ def analyze_live(text, previous="", ws="company"):
                         "hits": [{"name": h["name"], "type": h["type"], "detail": h.get("detail")} for h in hits]})
     out["show"] = bool(hits) or out.get("status") in ("contradict", "outdated", "agree", "agree_new", "context", "learned_update")
     out["total_ms"] = round((time.time() - t0) * 1000)
+    st["total_ms"] += out["total_ms"]
     return out
 
 
@@ -732,7 +808,7 @@ REPLAY = json.load(open(REPLAY_FILE)) if os.path.exists(REPLAY_FILE) else {}
 
 
 def replay_key(route, body):
-    return f"{route}|{body.get('ws') or 'company'}|{body.get('mode', 'speech')}|{(body.get('text') or '').strip()[:500]}"
+    return f"{route}|{body.get('ws') or 'company'}|{body.get('mode', 'speech')}|{body.get('llm_mode') or 'drex'}|{(body.get('text') or '').strip()[:500]}"
 
 
 def remember_replay(key, res):
@@ -768,6 +844,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/agents"):
             return self._send(200, agents_view())
+        if self.path.startswith("/api/llmstats"):
+            return self._send(200, LLM_STATS)
         if self.path.startswith("/api/integrations"):
             return self._send(200, {"slack": bool(secret(".slack_webhook", "SLACK_WEBHOOK_URL")),
                                     "deepinfra": bool(secret(".deepinfra_key", "DEEPINFRA_API_KEY"))})
@@ -833,10 +911,11 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"chunks_added": n, "ws": ws, "new_agents": [a["rule"] for a in new_rules],
                                     "workspaces": {w: len(I["chunks"]) for w, I in INDEXES.items()}})
         ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
+        local = "X-Forwarded-For" not in self.headers and self.client_address[0] == "127.0.0.1"
         now = time.time()
         hits = [t for t in RATE[ip] if now - t < 60]
         RATE[ip] = hits + [now]
-        if len(hits) >= PER_IP_PER_MIN or STATS["decisions"] >= MAX_DECISIONS:
+        if (not local and len(hits) >= PER_IP_PER_MIN) or STATS["decisions"] >= MAX_DECISIONS:
             return self._send(429, {"error": "Slow down: demo rate limit reached"})
         ws = body.get("ws") or "company"
         if self.path == "/api/agents":  # add a custom agent from one plain-English rule
@@ -854,7 +933,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/api/reset":  # clear what was learned this session (for rehearsals)
             with LOCK:
                 CHUNKS[:] = [c for c in CHUNKS if c["kind"] != "learned"]; LEARNED.clear(); ACTIONS.clear(); SESSION.clear()
-                AGENT_STATS.clear(); LAST_FLAG.clear(); build_index()
+                AGENT_STATS.clear(); LAST_FLAG.clear(); LLM_STATS.clear(); build_index()
             return self._send(200, agents_view())
         rkey = replay_key(route, body)
         try:
@@ -864,7 +943,7 @@ class H(BaseHTTPRequestHandler):
                 remember_replay(rkey, res)
                 return self._send(200, res)
             if body.get("mode", "speech") == "speech":
-                res = analyze_live(body.get("text", ""), body.get("previous", ""), ws)
+                res = analyze_live(body.get("text", ""), body.get("previous", ""), ws, body.get("llm_mode") or "drex")
             else:
                 res = analyze(body.get("text", ""), body.get("mode", "speech"), body.get("previous", ""), ws)
         except Exception as e:  # keep the demo alive: fall back to a recorded real answer if we have one

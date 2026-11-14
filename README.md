@@ -20,6 +20,7 @@ Hallucinot listens to what you say (or reads the tab you're on), finds the relev
 | ➕ Add knowledge (PDF, image, Word, slides via NDI); its rules become agents | "What I know" box |
 | 📋 Meeting recap → Slack → **@Intern** follows up on action items | "After the meeting" box |
 | 🧩 Chrome extension: check the tab you're on | `extension/` |
+| ✍️ System 2: Drex decides when DeepInfra's LLM writes (answers, corrections); toggle to compare with LLM-on-every-sentence | Live tab, Writer toggle |
 | 🛟 Replay insurance: real answers recorded and replayed (labeled) if the API is down | automatic |
 
 Optional keys (files are git-ignored, or set them as env vars): `.nace_key` / `NACE_API_KEY` (required), `.deepinfra_key` / `DEEPINFRA_API_KEY`, `.slack_webhook` / `SLACK_WEBHOOK_URL`.
