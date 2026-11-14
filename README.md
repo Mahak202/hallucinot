@@ -1,114 +1,134 @@
-# Hallucinot 🦖
+# 🦖 Hallucinot
 
-*For once, AI fixes **human** hallucinations.*
+### *For once, AI fixes **human** hallucinations.*
 
-Hallucinot listens to what you say (or reads the tab you're on), finds the relevant piece of your knowledge base, and shows it. When you say something that contradicts the source, it says so in red with the receipt. Every decision is made by **Drex**: should we speak, which document, and does it agree or contradict.
+Everyone's busy making sure the AI doesn't make things up. Nobody's watching the meeting, where a rep just promised a discount the contract doesn't allow, a teammate stated a decision that got reversed last week, or someone read out an API key out loud. Hallucinot does — live, on every sentence, with the receipt shown.
 
-**Built with Nace:**
-- **Drex** makes every decision: the router, each agent, the verdict, which fix to show, and the negotiation between agents.
-- **NDI** (Perception API) parses uploaded PDFs, images (OCR), Word and slides into the knowledge base, and the rules it finds become new agents.
-- **Intern** gets the meeting recap and action items in Slack for follow-up.
+It's judged by **Drex**: not a wrapper around one model call, but a small team of agents — each one a separate Drex decision — that check, flag, and when they disagree with each other, *negotiate*.
 
-**Partners:**
-- **Adobe Express / Firefly:** classroom posters, slides.
-- **DeepInfra:** "System 2" writer for the recap.
+> 🏁 Built for **Drexathon 2026**, entering as a **Wildcard** — because our demo isn't a sandbox, it's running on a real problem right now: Hallucinot is helping judge Drexathon itself.
 
-| Feature | Where |
+<p>
+  <a href="https://quench-humped-excluding.ngrok-free.dev/"><img alt="Live demo" src="https://img.shields.io/badge/demo-live-2BF2A0?style=for-the-badge"></a>
+  <img alt="Track" src="https://img.shields.io/badge/track-Swarm%20Intelligence-5BD8EC?style=for-the-badge">
+  <img alt="Built with" src="https://img.shields.io/badge/built%20with-Nace%20Drex-FFC257?style=for-the-badge">
+</p>
+
+---
+
+## What it actually does
+
+Say something, type something, or just leave it on a tab. Hallucinot finds the piece of your knowledge base that matters, and shows you one of four verdicts:
+
+| Verdict | Meaning |
 |---|---|
-| 🎙️ Live meeting: agents check every sentence, learn decisions, negotiate | Live tab |
-| 📄 Check any document claim by claim, with **Fix** and **Cite** | Check a document tab |
-| ➕ Add knowledge (PDF, image, Word, slides via NDI); its rules become agents | "What I know" box |
-| 📋 Meeting recap → Slack → **@Intern** follows up on action items | "After the meeting" box |
-| 🧩 Chrome extension: check the tab you're on | `extension/` |
-| ✍️ System 2: Drex decides when DeepInfra's LLM writes (answers, corrections); toggle to compare with LLM-on-every-sentence | Live tab, Writer toggle |
-| 🛟 Replay insurance: real answers recorded and replayed (labeled) if the API is down | automatic |
+| ✅ **Checks out** | Matches the source. Say on. |
+| 🦖 **Hallucination** | Contradicts the source — shown with the exact line, and the corrected sentence to say instead. |
+| 🔵 **Context** | No contradiction, just useful background from the source. |
+| 🤫 **Stays quiet** | Nothing to flag. Most sentences, correctly, get no card at all. |
 
-Optional keys (files are git-ignored, or set them as env vars): `.nace_key` / `NACE_API_KEY` (required), `.deepinfra_key` / `DEEPINFRA_API_KEY`, `.slack_webhook` / `SLACK_WEBHOOK_URL`.
+Nothing is generated from a model's memory. Every card traces back to a real line in a real document.
+
+## The part that makes this a *team*, not a tool
+
+A sentence doesn't get one verdict from one model call. It goes through a router, then a panel — each member is its own Drex decision, running in parallel:
+
+```mermaid
+flowchart LR
+    A["🎙️ You speak / type / drop a doc"] --> B["Drex router\nclassifies the sentence"]
+    B --> C["📚 Fact checker"]
+    B --> D["💡 Suggest"]
+    B --> E["⚖️ Policy guards\n(auto-written from your docs)"]
+    B --> F["📝 Action items"]
+    B --> G["🔒 Leak guard"]
+    B --> H["🧠 Decision recorder"]
+    C -. disagree? .-> N["🤝 Negotiate\n(3rd Drex call arbitrates)"]
+    E -. disagree? .-> N
+    N --> V["Card, with the receipt"]
+    C --> V
+    D --> V
+    F --> V
+    G --> V
+    H --> V
+```
+
+- **📚 Fact checker** — does this contradict the documents?
+- **💡 Suggest** — is this a question the docs already answer? Show it, unprompted.
+- **⚖️ Policy guards** — these **write themselves**. Every rule-like sentence in your own documents ("requires…", "only…", "cannot…") becomes a standing checker, automatically, no config.
+- **📝 Action items** — is someone committing to send, fix, schedule, or follow up on something?
+- **🔒 Leak guard** — is a password, API key, or personal data being said out loud?
+- **🧠 Decision recorder** — is this a new decision being announced as settled fact? It remembers, with no clicks, and flags later statements that contradict it as "⚠️ this changed today."
+- **🚩 Custom agents** — type any rule in plain English with **+ Add agent** and it joins the panel.
+
+When two of them disagree on the same sentence — say, **Policy guard** flags the wording of a discount promise while **Fact checker** independently matches it to a clause that already authorizes it — a **third Drex call arbitrates**, and you get one resolved 🤝 card instead of two contradicting ones.
+
+## The numbers
+
+`eval/cases.py` — 50 real meeting lines, judged against 300 real `pallets/flask` pull requests.
+
+| | Drex | Claude Opus 5.5 |
+|---|---|---|
+| Accuracy | **47 / 50** | 47 / 50 |
+| Median latency | **0.38s** | 2.2s |
+| Cost per check | **~1/500th** | — |
+
+Same accuracy. ~6× faster. ~500× cheaper. Every miss on both sides came from the retrieval step, not either model.
 
 ## Run it
 
 ```bash
-git clone https://github.com/harsh-neubird/hallucinot && cd hallucinot
+git clone https://github.com/Mahak202/hallucinot && cd hallucinot
 echo "YOUR_NACE_KEY" > .nace_key      # or: export NACE_API_KEY=...
 python3 server.py
 ```
 
-Then open http://localhost:8787 in **Chrome**. Click **Start listening**, or type a sentence and press Enter.
+Open **http://localhost:8787** in Chrome. Click **Start listening**, or just type a sentence and hit enter.
 
-To use your own knowledge (any folder, any public GitHub repo):
+Bring your own knowledge base:
 
 ```bash
 python3 server.py --folder ~/path/to/docs --repo owner/name
 ```
 
-- **Folders:** `.md .txt .csv .json .py .js .yaml …` are read directly. PDFs go through `parse_pdf()` in `server.py`; swap in **NDI** there at the event.
-- **Repos:** the last ~300 merged PRs are fetched with `gh` and cached in `kb/github/`.
-- **Drex key:** read from `NACE_API_KEY` or the `.nace_key` file (git-ignored).
+Without flags it loads `kb/company/` (a fictional "Quokka Analytics" contract, Q3 metrics, a postmortem, a design doc) plus real `pallets/flask` PRs, and `kb/classroom/` (Bio 101 notes) as a second workspace.
 
-Without flags, the server loads `kb/company/` (fictional "Quokka Analytics" docs) plus the `pallets/flask` PRs.
-
-## Check a document (any text, claim by claim)
-
-Open the **📄 Check a document** tab. Paste text or drop a PDF (for example one exported from **Adobe Express** or Acrobat), then click **Check every claim**. Each sentence gets one of:
-- 🦖 **Hallucination**, with what the source actually says
-- ✅ **Checks out**
-- 🟡 **No source**, meaning add a citation
-
-The built-in samples are a 🤖 chatbot answer, a 🎓 student poster and a ✉️ customer email. Sentences are checked in parallel, so a whole document takes about 1 second.
-
-**Workspaces:** switch the knowledge base between 🏢 **Company** (`kb/company` + GitHub PRs) and 🎓 **Classroom** (`kb/classroom`, demo Bio 101 notes). Add your own with `--folder name=PATH`.
-
-## Multi-agent (Track 2: Swarm Intelligence)
-
-Every sentence goes through a Drex router, then a panel of agents evaluates it — each one a separate Drex call, so no agent's verdict is generated, only decided. Built in: 📚 Fact checker, 📝 Action items, 🔒 Leak guard, 🧠 Decision recorder. Plus ⚖️ policy agents that write themselves — every rule-like sentence in your documents ("requires...", "only...", "cannot...") becomes a standing checker automatically. Plus custom agents typed in plain English via **+ Add agent**.
-
-It learns with no clicks: a decision announced in the meeting is remembered; a later statement that contradicts it shows ⚠️ "this changed today"; a self-correction counts as "learned (+1)".
-
-**Agents don't just run in parallel — they negotiate.** When ⚖️ Policy guard flags a statement by a rule's wording, and 📚 Fact checker independently finds the same statement actually matches the real source, that's a live disagreement between two agents. A third Drex call arbitrates between their two positions, and one agent can stand the other down — the system shows a single 🤝 resolved verdict instead of two conflicting cards.
-
-Demo lines (prefix with a speaker name, e.g. `Dana: ...`, and **↺ Reset session** first):
-| Say | Expected |
-|---|---|
-| "Sure, I can give you 20% off if you sign today" | ⚖️ Policy guard |
-| "We're giving Acme a 25 percent credit this month since their uptime dropped below 99 percent" | ⚖️ would normally fire (>10% needs approval) — 📚 Fact checker matches it to the SLA's automatic credit clause — 🤝 Drex arbitrates and stands the policy flag down |
-| "Our SLA with Acme is 99.99 percent uptime" → "Sorry, I meant 99.9 percent" | 🦖 then ✅ corrected (+1) |
-| "I'll send you the renewal quote by Friday" | 📝 Action items |
-| "The staging API key is sk-live-8812" | 🔒 Leak guard |
-| "We decided last week to move the SLA to 99.95 percent" → "So the SLA is 99.9 percent, right?" | 🧠 learned → ⚠️ outdated |
-
-## Chrome extension (any-tab mode)
+### As a Chrome extension (check any tab)
 
 1. Start the server (above).
-2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `extension/` folder.
-3. Click the Hallucinot toolbar icon to open the side panel. It checks each tab you switch to, or click **Check this page**. Select text on a page to check just that.
+2. `chrome://extensions` → **Developer mode** → **Load unpacked** → select `extension/`.
+3. Click the toolbar icon. It checks whatever tab you're on — Zoom chat, Gmail, a doc, anywhere.
 
-Use the mic on the main page at localhost:8787. Inside the side panel, Chrome may block the microphone.
+### Check a whole document at once
 
-## Demo script
+Open **📄 Check a document**, paste text or drop a PDF, and every sentence gets judged in parallel — a full document in about a second. Built-in samples: a chatbot answer, a student poster, a customer email.
 
-| Say / show | Expected |
+## Try a few lines
+
+| Say | What happens |
 |---|---|
-| "Why did churn go up in Q3?" | 📄 Q3 metrics: Starter plan price increase |
-| "Let's grab lunch after this." | 🤫 stays quiet |
-| "We switched redirects to 301." | 🦖 Human hallucination: PR #5898 says 303 |
-| "Our SLA with Acme is 99.99 percent uptime." | 🦖 Contract says 99.9% |
-| "Acme gets a 10% credit if uptime drops below 99.9%." | ✅ Checks out |
-| "We use JWTs for dashboard login." | 🦖 Design doc: session cookies, not JWTs |
-| Gmail tab with Raj's email claiming 99.99% / 25% credit | 🦖 Contract clause |
-| A random recipe site | 🤫 stays quiet |
+| "Sure, I can give you 20% off if you sign today" | ⚖️ Policy guard fires |
+| "We're giving Acme a 25% credit since uptime dropped below 99%" | ⚖️ would normally fire — but 📚 Fact checker matches the SLA's automatic credit clause — 🤝 Drex arbitrates and stands the flag down |
+| "Our SLA with Acme is 99.99% uptime" → "Sorry, I meant 99.9%" | 🦖 then ✅ — self-correction, learned |
+| "I'll send you the renewal quote by Friday" | 📝 Action items |
+| "The staging API key is sk-live-8812" | 🔒 Leak guard |
+| "Let's grab lunch after this" | 🤫 stays quiet |
 
-## How it works
+## Where this fits — Drexathon tracks
 
-```
-mic (Chrome speech-to-text) or tab text
-  → keyword search over the knowledge base → top 12 candidates
-  → Drex call 1: what was said (question / claim / other) + which candidate (or none)
-  → Drex call 2 (claims only): agree / contradict / unclear vs the chosen source
-  → card: blue context · green checks out · red hallucination · amber unsure
-```
+| 🦖 Apex Predator | 🧬 Swarm Intelligence | 🎨 Wildcard *(our entry)* |
+|---|---|---|
+| Drex vs. the Giants — benchmarked head-to-head against Claude Opus above | Agents that coordinate and negotiate, every call made by Drex | We're running this on a live problem right now: Hallucinot is judging Drexathon itself, reading every team's demo and repo to reach the call |
 
-Typical latency: about 0.3 s per Drex call, 0.6 s for a full fact-check.
+## Built with
 
-## Benchmark (Drex vs Claude)
+**Nace** — `Drex` makes every decision: the router, each agent, the verdicts, the fix, the negotiation. `NDI` turns uploaded PDFs, scans, slides, and Word docs into knowledge — and the rules it finds inside them become new agents automatically. `Intern` gets the meeting recap in Slack and follows up on action items.
 
-`eval/cases.py` holds 50 meeting lines labeled against the Flask PRs. The 2026-11-13 run: Drex 47/50 and Claude Opus 5.5 47/50. Drex took a median 0.38 s against 2.2 s for Claude, at roughly 1/500th of the cost. All three misses came from the keyword search, not from either model.
+**Partners** — Adobe Express & Firefly (poster, slides, mascot), DeepInfra running Llama 3.3 70B as the optional "System 2" recap writer.
+
+## Honest limits
+
+Demo data is fictional (Quokka Analytics, Bio 101) plus one public repo. Retrieval is keyword-based, not embeddings — the few misses in the benchmark came from there, not from Drex's judgment. Learned decisions live in memory for the session, not a database.
+
+---
+
+*Built by **Harsh** & **Mahak** for Drexathon 2026. This is Mahak's copy of the project — the primary team repo lives at [harsh-neubird/hallucinot](https://github.com/harsh-neubird/hallucinot).*
