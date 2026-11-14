@@ -131,6 +131,32 @@ textarea{width:100%;min-height:150px;border:0;outline:0;resize:vertical;backgrou
 .written{margin:6px 0 2px;font-size:14px;background:var(--accent-bg, #efe9fb);border-radius:8px;padding:6px 8px}
 details.more{margin:-2px 0 8px}
 details.more summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.transcript{display:flex;flex-direction:column;gap:2px;max-height:62vh;overflow:auto;padding-right:4px}
+.tsum{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.tc{font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;background:var(--grey-bg);color:var(--muted)}
+.tc.g{background:var(--green-bg);color:var(--green)}.tc.r{background:var(--red-bg);color:var(--red)}.tc.o{background:var(--amber-bg);color:var(--amber)}
+.tc.a{background:var(--amber-bg);color:var(--amber)}.tc.b{background:var(--blue-bg);color:var(--blue)}
+.tr{border-left:4px solid transparent;padding:6px 10px;border-radius:0 8px 8px 0;animation:in .2s}
+.tr.quiet{color:var(--muted);font-size:14px}
+.tr.g{border-left-color:var(--green)}.tr.r{border-left-color:var(--red);background:var(--red-bg)}
+.tr.o{border-left-color:#e07a1f;background:var(--amber-bg)}.tr.a{border-left-color:var(--amber);background:var(--amber-bg)}
+.tr.b{border-left-color:var(--blue)}
+.tr.clickable{cursor:pointer}.tr.clickable:hover{background:var(--grey-bg)}
+.tr.r.clickable:hover{background:var(--red-bg)}
+.tl{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.tt{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:38px}
+.ts{font-weight:700;font-size:13px}
+.tx{flex:1;min-width:200px}
+.tr.r .tx{text-decoration:line-through;text-decoration-color:var(--red)}
+.tch{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+.chip2{font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;white-space:nowrap;background:var(--grey-bg);color:var(--muted)}
+.chip2.g{background:var(--green-bg);color:var(--green)}.chip2.r{background:var(--red);color:#fff}.chip2.o{background:#e07a1f;color:#fff}
+.chip2.a{background:var(--amber);color:#fff}.chip2.b{background:var(--blue-bg);color:var(--blue)}.chip2.p{background:var(--accent-bg, #efe9fb);color:var(--accent)}
+.why{margin:4px 0 0 46px;font-size:13px;color:var(--ink)}
+.det{margin:6px 0 2px 46px;font-size:13px}
+.det .src{margin-top:4px}
+.warnrow{color:var(--amber);font-size:13px}
+.live{order:99;font-style:italic;color:var(--muted);margin:6px 0 0 50px}
 .tstrip{font-size:13px;color:var(--muted);margin:-4px 2px 8px;border-left:3px solid var(--line);padding-left:8px}
 .quietbar{font-size:12px;color:var(--muted);margin:0 2px 10px}
 .quiet.ok{color:var(--green);font-weight:600}
@@ -192,10 +218,8 @@ button.mic.ghost{background:transparent;color:var(--accent);border:1px solid var
     <span id="llmstats" class="sumtxt"></span>
   </div>
   </details>
-  <div class="live" id="live"></div>
-  <div class="tstrip" id="tstrip" hidden></div>
-  <div class="quietbar" id="quietbar" hidden></div>
-  <div class="feed" id="feed">
+  <div class="tsum" id="tsum" hidden></div>
+  <div class="feed transcript" id="feed">
     <div class="empty" id="empty">
       <div class="ehead">Press 🎙️ and talk, type a line, or try one:</div>
       <div class="chips" id="chips"></div>
@@ -203,6 +227,7 @@ button.mic.ghost{background:transparent;color:var(--accent);border:1px solid var
       <div class="sumtxt" style="margin-top:8px">Tip: start a line with a name to set the speaker, e.g. <code>Dana: …</code></div>
     </div>
   </div>
+  <div class="live" id="live"></div>
   </div>
   <aside class="panel">
     <div class="box">
@@ -316,55 +341,62 @@ function updStats(){
   document.getElementById('s-dec').textContent=S.dec;document.getElementById('s-cards').textContent=S.cards;
   const m=median(S.ms);document.getElementById('s-ms').textContent=m?m+' ms':'–';
 }
-function add(el){document.getElementById('empty')?.remove();feed.prepend(el);}
+function add(el){document.getElementById('empty')?.remove(); feed.appendChild(el); el.scrollIntoView({block:'nearest', behavior:'smooth'});}
 let QUIET = 0, TRANS = [];
-function updQuiet(){ const b = document.getElementById('quietbar'); b.hidden = !QUIET; b.textContent = `🤫 ${QUIET} sentence${QUIET==1?'':'s'} checked, nothing to flag`; }
-function addTranscript(t){ if(!t) return; TRANS.push(t); TRANS = TRANS.slice(-3); const el = document.getElementById('tstrip'); el.hidden = false;
-  el.innerHTML = TRANS.map((x,i) => `<div style="opacity:${0.45 + i*0.25}">${esc(x)}</div>`).join(''); }
-function foldOld(){ [...feed.querySelectorAll('.card')].forEach((c, i) => c.classList.toggle('folded', i >= 3)); }
+const CNT = {verified:0, wrong:0, flag:0, changed:0, todo:0, answered:0, quiet:0};
+function updCounts(){
+  const t = document.getElementById('tsum'); const n = Object.values(CNT).reduce((a,b)=>a+b,0); t.hidden = !n;
+  const part = (k, ic, lbl, cls) => CNT[k] ? `<span class="tc ${cls}">${ic} ${CNT[k]} ${lbl}</span>` : '';
+  t.innerHTML = part('verified','✅','verified','g') + part('wrong','🦖','wrong','r') + part('flag','🚩','flagged','o') + part('changed','⚠️','changed','a')
+    + part('answered','💡','answered','b') + part('todo','📝','to-do','b') + `<span class="tc n">💬 ${n} lines</span>`;
+}
+function updQuiet(){ updCounts(); }
+function resetCounts(){ Object.keys(CNT).forEach(k => CNT[k] = 0); QUIET = 0; TRANS = []; updCounts(); }
+const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+function firstSentence(t){ const m = String(t||'').match(/^(.{20,220}?[.!?])(\s|$)/); return m ? m[1] : String(t||'').slice(0,180); }
 
 function render(r){
-  if (r.kind==='llm' && !r.show) { const q=document.createElement('div');q.className='quiet';q.textContent=`🤫 LLM said nothing — “${(r.text||'').slice(0,70)}” (${r.written?.ms||'?'} ms LLM call)`; add(q); return; }
-  if (r.kind==='llm') { const el=document.createElement('div'); el.className='card answer'; el.innerHTML=`<div class="head"><span class="badge">✍️ LLM only</span><span class="meta">LLM ${r.written.ms} ms</span></div><div class="said"><span class="lbl">${esc(r.speaker||'Someone')} said</span><q>${esc(r.text)}</q></div><div class="written">✍️ ${esc(r.written.text)}<div class="sumtxt">${esc(r.written.by)} · ${esc(r.written.why)}</div></div>`; add(el); return; }
   S.dec++; (r.drex_ms||[]).forEach(x=>S.ms.push(x));
-  addTranscript(r.speaker ? `${r.speaker}: ${r.text}` : r.text);
-  if(!r.show){
-    if(r.corrected){ const q=document.createElement('div');q.className='quiet ok';q.textContent=`✅ ${r.speaker||'Speaker'} corrected it — Fact checker learned (+${r.corrected.count})`; add(q); }
-    else { QUIET++; updQuiet(); }
-    updStats(); refreshPanel(); return;
+  const d = r.doc, st = r.status || (r.verdict ? r.verdict : (r.kind==='page' ? 'page' : (d ? 'context' : null)));
+  const hits = r.agents || [], chips = [], why = [];
+  let tone = 'quiet', key = 'quiet';
+  const bump = (t, k) => { const rank = {quiet:0, verified:1, answered:2, todo:2, changed:3, flag:4, wrong:5}; if (rank[k] > rank[key]) { tone = t; key = k; } };
+  if (r.kind === 'llm') {                       // comparison mode: LLM only
+    if (r.show) { chips.push('<span class="chip2 b">✍️ LLM</span>'); why.push(`✍️ ${esc(r.written.text)}`); bump('b','answered'); }
   }
-  S.cards++;
-  const d=r.doc, st=r.status || (r.verdict ? r.verdict : (r.kind==='page'?'page':'context'));
-  const who = r.speaker ? `${esc(r.speaker)} said` : (r.kind==='question'?'Asked':'You said');
-  let cls='answer', badge='📄 Context', srcLbl='Source';
-  if(st==='page'){cls='page';badge='📎 From your knowledge base'}
-  if(st==='agree'){cls='agree';badge='✅ Checks out'}
-  if(st==='agree_new'){cls='agree';badge='✅ Matches what was decided today';srcLbl='Decided in this meeting'}
-  if(st==='unclear'){cls='unclear';badge='🟡 Related — source doesn’t confirm'}
-  if(st==='contradict'){cls='contradict';badge='<span class="dino">🦖</span> Human hallucination detected';srcLbl='Source actually says'}
-  if(st==='outdated'){cls='outdated';badge='⚠️ Heads up — this changed today';srcLbl='Decided in this meeting'}
-  if(st==='learned_update'){cls='learned';badge='🧠 New decision — doc is now outdated';srcLbl='Older doc said'}
-  const hits=r.agents||[];
-  if(!d && hits.length){ const f=hits.find(h=>h.type==='flag'); cls=f?'flagonly':(hits[0].type==='learn'?'learned':'logonly'); badge=f?`🚩 ${esc(f.name)}`:`${hits[0].icon} ${esc(hits[0].name)}`; }
-  const ms=(r.drex_ms||[]).reduce((a,b)=>a+b,0);
-  const conf = r.verdict_conf ?? r.conf ?? r.doc_conf;
-  const el=document.createElement('div');el.className='card '+cls;
-  el.innerHTML=`
-    <div class="head"><span class="badge">${badge}</span>${r.replayed?'<span class="srcb custom" title="Drex API unreachable: showing the real answer recorded earlier for this exact line">replayed</span>':''}<span class="meta">${hits.length+(d?1:0)} agent${hits.length+(d?1:0)==1?'':'s'} · Drex ${ms} ms${conf?` · ${Math.round(conf*100)}% sure`:''}</span></div>
-    ${r.kind!=='page'?`<div class="said"><span class="lbl">${who}</span><q>${esc(r.text)}</q>${r.heard?`<div class="sumtxt">🎙️ heard: “${esc(r.heard)}”</div>`:''}</div>`:''}
-    ${r.written?`<div class="written">✍️ ${esc(r.written.text)}<div class="sumtxt">written by ${esc(r.written.by)} · ${r.written.ms} ms · ${esc(r.written.why)}</div></div>`:''}
-    ${r.fix&&!r.written?`<div class="fix">✏️ <b>Correct:</b> ${esc(r.fix)}</div>`:''}
-    ${d?`<div class="src"><span class="lbl">${srcLbl}</span>
-      <div class="title">${esc(d.title)}${d.date?` · ${esc(d.date)}`:''}</div>
-      <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), r.text)}</div>
-      ${r.older?`<div class="sumtxt" style="margin-top:4px">⚠️ Older doc may be outdated: <b>${esc(r.older.title)}</b> — “${esc(r.older.text.slice(0,140))}…”</div>`:''}
-      ${d.url&&d.url.startsWith('http')?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>`:`<span class="sumtxt">${esc(d.source)}</span>`}
-    </div>`:''}
-    ${hits.length?`<div class="hits">${hits.map(h=>`<div class="hit ${h.type}"><b>${h.icon} ${esc(h.name)}</b>${esc(h.detail||'')}${h.doc?` <span class="sumtxt">(${esc(h.doc)})</span>`:''}</div>`).join('')}</div>`:''}
-    ${r.corrected?`<div class="corr">✅ Corrected — Fact checker learned (+${r.corrected.count})</div>`:''}`;
-  if(cls==='agree' && !hits.length){ el.classList.add('slim'); }
-  el.addEventListener('click', e => { if (el.classList.contains('folded') && !e.target.closest('a,button')) el.classList.remove('folded'); });
-  add(el); foldOld(); updStats(); refreshPanel(hits.map(h=>h.id).concat(d&&st!=='context'?['fact']:d?['suggest']:[]));
+  if (st === 'contradict') { chips.push('<span class="chip2 r">🦖 wrong</span>'); bump('r','wrong');
+    why.push(r.written ? `✍️ ${esc(r.written.text)}` : r.fix ? `✏️ Source says: ${esc(r.fix)}` : `✏️ ${esc(firstSentence(d && d.text))}`); }
+  if (st === 'outdated') { chips.push('<span class="chip2 a">⚠️ changed today</span>'); bump('a','changed');
+    why.push(r.written ? `✍️ ${esc(r.written.text)}` : `⚠️ Decided in this meeting: ${esc(firstSentence(d && d.text))}`); }
+  if (st === 'agree' || st === 'agree_new') { chips.push('<span class="chip2 g">✅ verified</span>'); bump('g','verified'); }
+  if (st === 'context' || st === 'page') { chips.push(`<span class="chip2 b">${st==='page'?'📎 related':'💡 answered'}</span>`); bump('b','answered');
+    why.push(r.written ? `✍️ ${esc(r.written.text)}` : `💡 ${esc(firstSentence(d && d.text))}`); }
+  if (st === 'learned_update') { chips.push('<span class="chip2 g">🧠 new decision</span>'); bump('g','verified'); }
+  for (const h of hits) {
+    if (h.type === 'flag') { chips.push(`<span class="chip2 o">${h.icon} ${esc(h.name)}</span>`); bump('o','flag'); why.push(`${h.icon} ${esc(h.detail||'')}`); }
+    else if (h.type === 'log') { chips.push('<span class="chip2 b">📝 to-do</span>'); bump('b','todo'); }
+    else if (h.type === 'learn') { chips.push('<span class="chip2 g">🧠 learned</span>'); }
+    else if (h.type === 'negotiate') { chips.push('<span class="chip2 p">🤝 agents agreed</span>'); why.push(`🤝 ${esc(h.detail||'')}`); }
+  }
+  if (r.corrected) chips.push(`<span class="chip2 g">✅ corrected (+${r.corrected.count})</span>`);
+  CNT[key]++; if (key === 'quiet') QUIET++; else S.cards++;
+  const ms = (r.drex_ms||[]).reduce((a,b)=>a+b,0), conf = r.verdict_conf ?? r.conf ?? r.doc_conf;
+  const el = document.createElement('div'); el.className = 'tr ' + tone;
+  el.innerHTML = `<div class="tl"><span class="tt">${now()}</span><span class="ts">${esc(r.speaker || (r.kind==='page' ? 'Page' : ''))}</span>
+      <span class="tx">${esc(r.kind==='page' ? (r.text||'').slice(0,120) : r.text)}</span><span class="tch">${chips.join('')}${r.replayed?'<span class="chip2 n" title="Drex API unreachable: recorded real answer">replayed</span>':''}</span></div>
+    ${why.length ? `<div class="why">${why.join('<br>')}</div>` : ''}
+    <div class="det" hidden>
+      ${r.heard ? `<div class="sumtxt">🎙️ heard: “${esc(r.heard)}”</div>` : ''}
+      ${d ? `<div class="src"><span class="lbl">Source</span><div class="title">${esc(d.title)}${d.date?` · ${esc(d.date)}`:''}</div>
+        <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), r.text)}</div>
+        ${r.older?`<div class="sumtxt">⚠️ Older doc may be outdated: ${esc(r.older.title)}</div>`:''}
+        ${d.url&&d.url.startsWith('http')?`<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>`:`<span class="sumtxt">${esc(d.source)}</span>`}</div>` : ''}
+      ${r.written ? `<div class="sumtxt">✍️ written by ${esc(r.written.by)} · ${r.written.ms} ms · ${esc(r.written.why)}</div>` : ''}
+      <div class="sumtxt">${hits.length + (d?1:0)} agent${hits.length+(d?1:0)==1?'':'s'} · Drex ${ms} ms${conf?` · ${Math.round(conf*100)}% sure`:''}</div>
+    </div>`;
+  if (d || r.heard || hits.length) el.classList.add('clickable');
+  el.addEventListener('click', e => { if (e.target.closest('a,button')) return; const det = el.querySelector('.det'); if (el.classList.contains('clickable')) det.hidden = !det.hidden; });
+  add(el); updCounts(); updStats(); refreshPanel(hits.map(h=>h.id).concat(d&&st!=='context'?['fact']:d?['suggest']:[]));
 }
 
 // ---- agents panel
@@ -396,7 +428,7 @@ document.getElementById('addagent').addEventListener('submit', async e=>{
 document.addEventListener('click', async e=>{ const b=e.target.closest('[data-del]'); if(!b) return;
   await fetch(API+'/api/agents/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.del})}); refreshPanel(); });
 document.getElementById('reset').addEventListener('click', async e=>{ e.preventDefault();
-  await fetch(API+'/api/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); feed.innerHTML=''; history=[]; QUIET=0; TRANS=[]; updQuiet(); document.getElementById('tstrip').hidden=true; refreshPanel(); });
+  await fetch(API+'/api/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); feed.innerHTML=''; history=[]; resetCounts(); refreshPanel(); });
 refreshPanel();
 async function refreshLlm(){
   let v; try { v = await fetch(API + '/api/llmstats').then(r => r.json()); } catch(_) { return; }
@@ -440,7 +472,7 @@ async function analyze(text, mode='speech', alternatives=[]){
     refreshLlm();
     if(r.error) throw new Error(r.error);
     render(r);
-  }catch(e){const q=document.createElement('div');q.className='quiet warn';
+  }catch(e){const q=document.createElement('div');q.className='tr warnrow';
     q.textContent='⚠️ '+(/Unexpected token|not valid JSON|Failed to fetch/.test(e.message)?'The server was briefly unavailable — say it again.':e.message+' — try again in a moment.');add(q);}
   if(mode==='speech') history.push(text);
 }
