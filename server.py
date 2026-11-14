@@ -1139,7 +1139,20 @@ def judge_analyze(text, override=None):
             if 2 < len(proj) < 40:
                 n.append(proj)
             return [x.lower() for x in n if len(x) > 3]
-        named = [t["slug"] for t in teams if any(re.search(r"\b" + re.escape(x) + r"\b", low) for x in names(t))]
+        import difflib
+        words = re.findall(r"[a-z0-9]+", low)
+        def mentioned(x):  # exact phrase, or a close match for invented names speech engines mangle ("hallucinote")
+            if re.search(r"\b" + re.escape(x) + r"\b", low):
+                return True
+            xs = x.split()
+            for i in range(len(words) - len(xs) + 1):
+                cand = " ".join(words[i:i + len(xs)])
+                if len(cand) > 4 and difflib.SequenceMatcher(None, cand, x).ratio() >= 0.82:
+                    return True
+            return False
+        named = [t["slug"] for t in teams if any(mentioned(x) for x in names(t))]
+        if not named and len(teams) == 1 and not JUDGE["current"]:
+            named = [teams[0]["slug"]]  # only one team loaded: it is the one presenting
         if len(named) == 1 and named[0] != JUDGE["current"]:
             JUDGE["current"] = named[0]; out["switched"] = True; out["team_guess"], out["team_conf"] = named[0], 1.0
     if not override and not out["switched"]:
