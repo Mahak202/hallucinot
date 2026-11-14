@@ -58,6 +58,16 @@ header h1{line-height:1.15}
 .track{height:10px;background:var(--grey-bg);border-radius:999px;overflow:hidden}
 .fill{height:100%;border-radius:999px}.fill.g{background:var(--green)}.fill.y{background:var(--amber)}.fill.r{background:var(--red)}
 @media (max-width:520px){.rb{grid-template-columns:110px 1fr 30px}.rb .muted{display:none}}
+.stepper{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+@media (max-width:700px){.stepper{grid-template-columns:1fr}}
+.sp{display:flex;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;text-decoration:none;color:var(--ink)}
+.sp small{display:block;color:var(--muted);font-size:12px}
+.sp .n,.bh .n{display:inline-flex;width:26px;height:26px;border-radius:50%;align-items:center;justify-content:center;background:var(--grey-bg);font-weight:800;font-size:13px;flex:none}
+.sp.done{border-color:var(--green)}.sp.done .n{background:var(--green);color:#fff}
+.bh .n{background:var(--accent);color:#fff;margin-right:6px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:700px){.two{grid-template-columns:1fr}}
+.stepbox{scroll-margin-top:12px}
 code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
 </style>
 </head>
@@ -81,15 +91,45 @@ code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
 <section id="judgeview" hidden>
   <header>
     <span style="font-size:30px">⚖️</span>
-    <div><h1>Hallucinot Judge</h1><div class="muted">Each team's live pitch, checked against its own materials. Drex detects who's presenting and checks every claim.</div></div>
-    <div style="margin-left:auto" class="muted"><a href="#board">📺 Status board</a> · <a href="/">← Hallucinot</a></div>
+    <div><h1>Judge the Drexathon</h1><div class="muted">Three steps. Drex checks every claim against each team's own materials, then scores everyone the same way.</div></div>
+    <div style="margin-left:auto" class="row"><a href="/" class="muted">🏠 Home</a><a href="/judge.html#board" target="_blank" rel="noopener"><button class="ghost" type="button">📺 Show on big screen</button></a></div>
   </header>
+
+  <div class="stepper">
+    <a href="#s1" class="sp" id="sp1"><span class="n">1</span><span><b>Load teams</b><small id="sp1t">not started</small></span></a>
+    <a href="#s2" class="sp" id="sp2"><span class="n">2</span><span><b>Live demos</b><small id="sp2t">waiting</small></span></a>
+    <a href="#s3" class="sp" id="sp3"><span class="n">3</span><span><b>Score &amp; shortlist</b><small id="sp3t">waiting</small></span></a>
+  </div>
+
   <div class="cols">
     <div>
-      <div class="box">
+      <div class="box stepbox" id="s1">
+        <div class="bh"><span class="n">1</span> Load the teams</div>
+        <div class="two">
+          <div>
+            <b>📥 Nace submissions export</b>
+            <div class="muted">Ask the organizers for the export (CSV / JSON). It reads team, project, explanation, repo and slides (via NDI).</div>
+            <input type="file" id="subfile" accept=".csv,.json,.txt" style="margin-top:8px">
+            <textarea id="subraw" placeholder="…or paste the CSV / JSON"></textarea>
+            <div class="row" style="margin-top:6px"><button id="subgo">Import</button><span id="subnote" class="muted"></span></div>
+          </div>
+          <div>
+            <b>🔗 Or paste repo links</b>
+            <div class="muted">One per line: <code>Team name, https://github.com/owner/repo</code></div>
+            <textarea id="bulk" placeholder="Team A, https://github.com/a/project&#10;Team B, https://github.com/b/project" style="margin-top:8px"></textarea>
+            <div class="row" style="margin-top:6px"><button id="bulkgo">Import</button><span id="bulknote" class="muted"></span></div>
+          </div>
+        </div>
+        <details style="margin-top:10px"><summary class="muted">Or let teams register themselves</summary>
+          <div class="row" style="margin-top:6px"><code id="reglink"></code><button class="ghost" id="copyreg" style="padding:3px 10px;font-size:12px">Copy link</button></div>
+        </details>
+      </div>
+
+      <div class="box stepbox" id="s2">
+        <div class="bh"><span class="n">2</span> Listen to the demos</div>
         <div class="row" style="justify-content:space-between">
           <div class="current" id="current">No team yet<small>Drex will detect who's presenting</small></div>
-          <label style="margin:0;width:auto">Override <select id="override" style="width:auto"><option value="">🤖 Auto-detect</option></select></label>
+          <label style="margin:0;width:auto">Presenting: <select id="override" style="width:auto"><option value="">🤖 Auto-detect</option></select></label>
         </div>
         <div class="row" style="margin-top:10px">
           <button id="mic">🎙️ Start listening</button>
@@ -98,34 +138,20 @@ code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
         <div class="live" id="live"></div>
         <div class="feed" id="feed"></div>
       </div>
+
+      <div class="box stepbox" id="s3">
+        <div class="bh"><span class="n">3</span> Score &amp; shortlist</div>
+        <div class="muted">Drex scores every team the same way on the official criteria (track fit, Drex, Intern, NDI, partner tools, evidence, live credibility). A first pass with receipts; human judges decide.</div>
+        <div class="row" style="margin-top:8px"><button id="scorego">🏆 Score all teams</button><span id="scorenote" class="muted"></span></div>
+        <div id="ranking"></div>
+      </div>
     </div>
     <aside>
       <div class="box">
-        <div class="bh">🏆 Drex co-judge</div>
-        <div class="muted">Drex scores every team the same way on the official criteria (track fit, Drex, Intern, NDI, partner tools, evidence, live credibility) from their submission, repo, slides and live claims. A first pass with receipts; human judges decide.</div>
-        <div class="row" style="margin-top:8px"><button id="scorego">Score all teams</button><span id="scorenote" class="muted"></span></div>
-        <div id="ranking"></div>
-      </div>
-      <div class="box">
         <div class="bh">📋 Teams <span class="muted" id="tcount"></span></div>
-        <div id="teams"><span class="muted">No teams yet.</span></div>
+        <div id="teams"><span class="muted">No teams yet. Start with step 1.</span></div>
       </div>
-      <div class="box">
-        <div class="bh">📥 Import Nace submissions</div>
-        <div class="muted">Ask the Nace organizers for the submissions export (CSV or JSON) and drop it here. It reads team name, project, explanation, repo link and slides link (slides parsed by NDI).</div>
-        <input type="file" id="subfile" accept=".csv,.json,.txt" style="margin-top:8px">
-        <textarea id="subraw" placeholder="…or paste the CSV / JSON here" style="margin-top:6px"></textarea>
-        <div class="row" style="margin-top:6px"><button id="subgo">Import submissions</button><span id="subnote" class="muted"></span></div>
-      </div>
-      <div class="box">
-        <div class="bh">➕ Add teams</div>
-        <div class="muted">Share this link so teams register themselves:</div>
-        <div class="row" style="margin:4px 0 8px"><code id="reglink"></code><button class="ghost" id="copyreg" style="padding:3px 10px;font-size:12px">Copy</button></div>
-        <div class="muted">…or paste one per line: <code>Team name, https://github.com/owner/repo</code></div>
-        <textarea id="bulk" placeholder="Team A, https://github.com/a/project&#10;Team B, https://github.com/b/project"></textarea>
-        <div class="row" style="margin-top:6px"><button id="bulkgo">Import</button><span id="bulknote" class="muted"></span></div>
-      </div>
-      <a href="#" id="reset" class="muted">↺ Reset scores</a>
+      <a href="#" id="reset" class="muted">↺ Reset claims &amp; scores</a>
     </aside>
   </div>
 </section>
@@ -135,7 +161,7 @@ code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
   <header>
     <span style="font-size:30px">📺</span>
     <div><h1>Drexathon live board</h1><div class="muted">Claims checked live against each team's own materials · first-pass scores by Drex · human judges decide</div></div>
-    <div style="margin-left:auto" class="muted"><a href="#">Judge console</a></div>
+    <div style="margin-left:auto" class="muted"><a href="/">🏠 Home</a> · <a href="/judge.html">Judge console</a></div>
   </header>
   <div class="phase" id="b-phase"></div>
   <div class="cols">
@@ -154,7 +180,7 @@ code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:12px}
   <header>
     <span style="font-size:30px">🧾</span>
     <div><h1 id="t-name"></h1><div class="muted" id="t-one"></div></div>
-    <div style="margin-left:auto" class="muted"><a href="#board">📺 Board</a> · <a href="#">Judge console</a></div>
+    <div style="margin-left:auto" class="muted"><a href="/judge.html#board">📺 Board</a> · <a href="/judge.html">Judge console</a></div>
   </header>
   <div class="cols">
     <div>
@@ -174,7 +200,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const post = (p, b) => fetch(API + p, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b)}).then(r => r.json());
 const H = location.hash;
-const VIEW = H === '#register' ? 'reg' : H === '#board' ? 'board' : H.startsWith('#team=') ? 'team' : 'console';
+const VIEW = H === '#register' ? 'reg' : H === '#board' ? 'board' : H.startsWith('#team=') ? 'team' : 'console';  // #s1..#s3 = console sections
 const isReg = VIEW === 'reg';
 $('regview').hidden = VIEW !== 'reg'; $('judgeview').hidden = VIEW !== 'console';
 $('boardview').hidden = VIEW !== 'board'; $('teamview').hidden = VIEW !== 'team';
@@ -214,6 +240,11 @@ async function refresh(){
   const sel = $('override'), v = sel.value;
   sel.innerHTML = '<option value="">🤖 Auto-detect</option>' + STATE.teams.map(t => `<option value="${esc(t.slug)}">${esc(t.name)}</option>`).join('');
   sel.value = v;
+  const claims = Object.values(STATE.scores).reduce((n, x) => n + (x.claims || 0), 0);
+  const stp = (id, done, txt) => { $(id).classList.toggle('done', done); $(id + 't').textContent = txt; };
+  stp('sp1', STATE.teams.length > 0, STATE.teams.length ? `${STATE.teams.length} teams loaded` : 'not started');
+  stp('sp2', claims > 0, claims ? `${claims} claims checked` : (STATE.teams.length ? 'ready' : 'waiting'));
+  stp('sp3', (STATE.ranking || []).length > 0, (STATE.ranking || []).length ? 'shortlist ready' : (claims ? 'ready' : 'waiting'));
   $('current').innerHTML = STATE.current ? `🎤 ${esc(name(STATE.current))}<small>${esc((STATE.teams.find(t=>t.slug===STATE.current)||{}).oneliner||'')}</small>` : 'No team yet<small>Drex will detect who\'s presenting</small>';
 }
 const LBL = {agree:'✅ Backed by their materials', contradict:'🦖 Contradicts their own materials', no_source:'🟡 Not in their materials', not_claim:''};
@@ -251,6 +282,7 @@ $('scorego').addEventListener('click', async () => {
   const r = await post('/api/judge/score', {});
   if (r.error) { note.textContent = '⚠️ ' + r.error; return; }
   note.textContent = `${r.ranking.length} teams scored`;
+  refresh();
   const medal = i => ['🥇','🥈','🥉'][i] || `${i+1}.`;
   $('ranking').innerHTML = r.ranking.map((t, i) => `<div class="team"><b>${medal(i)} <a href="#team=${encodeURIComponent(t.slug)}">${esc(t.team)}</a></b> <span class="chip ${i<3?'g':'n'}">${t.total}/100</span>
     <div class="chips">${Object.values(t.criteria).map(c => `<span class="chip ${c.score===null?'n':c.score>=3?'g':c.score>=1.5?'y':'r'}" title="${Math.round(c.confidence*100)}% sure">${esc(c.label)} ${c.score===null?'n/a':c.score.toFixed(1)}</span>`).join('')}</div></div>`).join('')
@@ -309,7 +341,7 @@ async function renderTeam(){
 if (VIEW === 'console') refresh();
 if (VIEW === 'board') { renderBoard(); setInterval(renderBoard, 3000); }
 if (VIEW === 'team') { renderTeam(); setInterval(renderTeam, 4000); }
-window.addEventListener('hashchange', () => location.reload());
+window.addEventListener('hashchange', () => { if (!/^#s\d$/.test(location.hash)) location.reload(); });
 </script>
 </body>
 </html>

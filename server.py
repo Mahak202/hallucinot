@@ -1099,8 +1099,9 @@ class H(BaseHTTPRequestHandler):
             wss = {ws: len(I["chunks"]) for ws, I in INDEXES.items()}
             return self._send(200, {"chunks": len(CHUNKS), "by_kind": by, "workspaces": wss, "know": know_view(),
                                     "sources": sorted({c["source"].split(" PR #")[0] for c in CHUNKS})[:50], "stats": STATS})
-        path = self.path.split("?")[0]
-        f = os.path.join(ROOT, "ui", "index.html" if path in ("/", "") else path.lstrip("/"))
+        path, _, query = self.path.partition("?")
+        page = {"/": "home.html" if not query else "index.html", "": "home.html", "/app": "index.html", "/judge": "judge.html"}.get(path)
+        f = os.path.join(ROOT, "ui", page or path.lstrip("/"))
         if os.path.isfile(f) and os.path.realpath(f).startswith(os.path.join(ROOT, "ui")):
             ctype = {"html": "text/html", "js": "text/javascript", "css": "text/css", "png": "image/png",
                      "svg": "image/svg+xml"}.get(f.rsplit(".", 1)[-1], "application/octet-stream")
