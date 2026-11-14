@@ -10,9 +10,9 @@
     overlay.id = 'hn-offline';
     overlay.innerHTML = `
       <div class="hn-card">
-        <div class="hn-top"><b>📡 You're offline</b><span>Catch the ✅ facts, dodge the ❌ hallucinations. Use ← → or move the mouse.</span></div>
+        <div class="hn-top"><b>${window.HN_PLAY ? '🎮 Catch the facts' : "📡 You're offline"}</b><span>Catch the ✅ facts, dodge the ❌ hallucinations. Use ← → or move the mouse.</span></div>
         <canvas width="640" height="360"></canvas>
-        <div class="hn-bot"><span id="hn-score"></span><button id="hn-retry" type="button">Play again</button><span class="hn-dim">We'll reconnect automatically.</span></div>
+        <div class="hn-bot"><span id="hn-score"></span><button id="hn-retry" type="button">Play again</button><span class="hn-dim">${window.HN_PLAY ? '<a href="/" style="color:#9aa0a8">← Back to Hallucinot</a>' : "We'll reconnect automatically."}</span></div>
       </div>`;
     const st = document.createElement('style');
     st.textContent = `#hn-offline{position:fixed;inset:0;background:rgba(10,11,13,.82);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -67,9 +67,9 @@
   // when to show: the browser goes offline, or our server stops answering
   let fails = 0;
   addEventListener('offline', show);
-  addEventListener('online', () => { fails = 0; hide(); });
+  addEventListener('online', () => { fails = 0; if (!window.HN_PLAY) hide(); });
   setInterval(async () => {
-    try { const r = await fetch('/api/kb', {cache: 'no-store'}); if (!r.ok) throw 0; fails = 0; if (navigator.onLine) hide(); }
+    try { const r = await fetch('/api/kb', {cache: 'no-store'}); if (!r.ok) throw 0; fails = 0; if (navigator.onLine && !window.HN_PLAY) hide(); }
     catch (_) { if (++fails >= 2) show(); }
   }, 5000);
   window.hnOfflineGame = {show, hide};   // for testing
