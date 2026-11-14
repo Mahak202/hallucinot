@@ -63,7 +63,35 @@ footer{margin-top:18px;font-size:12px;color:var(--muted)}
 .dino{display:inline-block}
 .contradict .dino{animation:stomp .5s ease-out}
 @keyframes stomp{0%{transform:scale(2.2) rotate(-15deg)}60%{transform:scale(.9)}100%{transform:scale(1)}}
-@media (max-width:480px){.stats{margin-left:0;width:100%}h1{font-size:21px}}
+.tabs{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--grey-bg);border-radius:999px;padding:3px}
+.seg button{border:0;background:transparent;color:var(--muted);padding:7px 14px;border-radius:999px;font-weight:600;cursor:pointer;font-size:14px}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.ws{margin-left:auto;font-size:13px;color:var(--muted)}
+.ws select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.drop{margin-top:14px;border:2px dashed var(--line);border-radius:14px;padding:10px;background:var(--panel)}
+.drop.over{border-color:var(--accent)}
+textarea{width:100%;min-height:150px;border:0;outline:0;resize:vertical;background:transparent;color:var(--ink);font:15px/1.5 inherit;font-family:inherit}
+.docbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}
+.file{cursor:pointer;font-size:14px;font-weight:600;color:var(--accent)}
+.samples{font-size:13px;color:var(--muted);margin-left:auto}
+.samples a{color:var(--blue);text-decoration:none}
+#docsum{margin:14px 0 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chip{border-radius:999px;padding:5px 12px;font-weight:700;font-size:14px}
+.chip.r{background:var(--red-bg);color:var(--red)}.chip.g{background:var(--green-bg);color:var(--green)}.chip.y{background:var(--amber-bg);color:var(--amber)}.chip.n{background:var(--grey-bg);color:var(--muted)}
+.sumtxt{font-size:12px;color:var(--muted)}
+.claim{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:10px;padding:10px 12px}
+.claim.contradict{border-left-color:var(--red);background:linear-gradient(0deg,var(--panel),var(--red-bg))}
+.claim.agree{border-left-color:var(--green)}
+.claim.no_source{border-left-color:var(--amber)}
+.claim.not_claim{opacity:.55;padding:6px 12px;font-size:13px}
+.claim .st{font-weight:700;font-size:13px}
+.claim.contradict .st{color:var(--red)}.claim.agree .st{color:var(--green)}.claim.no_source .st{color:var(--amber)}.claim.not_claim .st{color:var(--muted)}
+.claim .s{margin:3px 0}
+.claim.contradict .s{text-decoration:line-through;text-decoration-color:var(--red)}
+.claim details{font-size:13px;margin-top:4px}
+.claim summary{cursor:pointer;color:var(--muted)}
+@media (max-width:480px){.ws{margin-left:0}.samples{margin-left:0}.stats{margin-left:0;width:100%}h1{font-size:21px}}
 </style>
 </head>
 <body>
@@ -79,6 +107,12 @@ footer{margin-top:18px;font-size:12px;color:var(--muted)}
     </div>
   </header>
 
+  <div class="tabs">
+    <div class="seg" id="tabs"><button data-tab="live" class="on">🎙️ Live</button><button data-tab="doc">📄 Check a document</button></div>
+    <label class="ws">Knowledge: <select id="ws"><option value="company">🏢 Company</option><option value="classroom">🎓 Classroom</option></select></label>
+  </div>
+
+  <section id="tab-live">
   <div class="controls">
     <button class="mic" id="mic">🎙️ Start listening</button>
     <form id="f"><input type="text" id="t" placeholder="…or type what someone says, then Enter" autocomplete="off"><button class="mic" style="background:var(--ink)">Check</button></form>
@@ -87,6 +121,20 @@ footer{margin-top:18px;font-size:12px;color:var(--muted)}
   <div class="feed" id="feed">
     <div class="empty" id="empty">Talk or type. Try <code>Why did churn go up in Q3?</code>, <code>Our SLA with Acme is 99.99% uptime</code>, <code>We switched redirects to 301</code>, or <code>let's grab lunch</code>.</div>
   </div>
+  </section>
+
+  <section id="tab-doc" hidden>
+    <div class="drop" id="drop">
+      <textarea id="doctext" placeholder="Paste anything: a chatbot answer, an email, a sales one-pager, a student's poster or essay… or drop a PDF / text file here (e.g. exported from Adobe Express)."></textarea>
+      <div class="docbar">
+        <button class="mic" id="docgo">🦖 Check every claim</button>
+        <label class="file">📎 Open PDF / text<input type="file" id="file" accept=".pdf,.txt,.md,.csv" hidden></label>
+        <span class="samples">Try: <a href="#" data-sample="bot">🤖 chatbot answer</a> · <a href="#" data-sample="poster">🎓 student poster</a> · <a href="#" data-sample="email">✉️ customer email</a></span>
+      </div>
+    </div>
+    <div id="docsum"></div>
+    <div class="feed" id="docres"></div>
+  </section>
   <footer>Knowledge: local files + GitHub PRs · Search: keyword · Every decision (speak? which doc? agree/contradict?) by Drex.</footer>
 </div>
 <script>
@@ -95,7 +143,20 @@ const feed = document.getElementById('feed'), live = document.getElementById('li
 const S = {dec:0, cards:0, ms:[]};
 let history = [];
 
-fetch(API + '/api/kb').then(r => r.json()).then(k => document.getElementById('s-kb').textContent = k.chunks + ' chunks').catch(()=>{});
+const wsSel = document.getElementById('ws');
+let KB = {};
+function showKb(){ const n = (KB.workspaces||{})[wsSel.value]; document.getElementById('s-kb').textContent = (n ?? KB.chunks ?? '–') + ' chunks'; }
+fetch(API + '/api/kb').then(r => r.json()).then(k => { KB = k; showKb(); }).catch(()=>{});
+wsSel.addEventListener('change', showKb);
+try { const saved = localStorage.getItem('hn-ws'); if (saved) wsSel.value = saved; } catch(_) {}
+wsSel.addEventListener('change', () => { try { localStorage.setItem('hn-ws', wsSel.value) } catch(_) {} });
+
+// ---- tabs
+document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.getElementById('tab-live').hidden = b.dataset.tab !== 'live';
+  document.getElementById('tab-doc').hidden = b.dataset.tab !== 'doc';
+}));
 
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function highlight(src, said){
@@ -143,7 +204,7 @@ async function analyze(text, mode='speech'){
   text=text.trim(); if(!text) return;
   try{
     const r=await fetch(API+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text,mode,previous:history.slice(-4).join(' ')})}).then(r=>r.json());
+      body:JSON.stringify({text,mode,previous:history.slice(-4).join(' '),ws:wsSel.value})}).then(r=>r.json());
     if(r.error) throw new Error(r.error);
     render(r);
   }catch(e){const q=document.createElement('div');q.className='quiet';q.textContent='⚠️ '+e.message;add(q);}
@@ -171,6 +232,75 @@ mic.addEventListener('click',()=>{
   rec.onend=()=>{if(listening) try{rec.start()}catch(_){}};
   rec.start();listening=true;mic.classList.add('on');mic.textContent='⏹ Listening — click to stop';
 });
+
+// ---- check a document, claim by claim
+const SAMPLES = {
+  bot: ['company', "Thanks for reaching out! The Growth plan is $48,000 per year. It includes single sign-on for all your users and a 99.99% uptime guarantee. If we miss the guarantee you get a 10% service credit. Your data is retained for 13 months. Let me know if you have other questions!"],
+  poster: ['classroom', "THE CELL\nBy Jamie, Bio 101\n• Mitochondria produce most of the cell's ATP.\n• Mitochondria are only found in plant cells.\n• DNA is shaped like a triple helix.\n• Humans have 48 chromosomes in each body cell.\n• Plant cells have a cell wall made of cellulose.\n• Ribosomes build proteins.\n• Cells are super cool!"],
+  email: ['company', "Hi Dana,\nThe October 21 outage pushed you under your uptime guarantee. Per our contract you guarantee 99.99% uptime, and we expect the 25% service credit for October. Also, our contract renews on March 3, 2027, so please send the renewal quote.\nThanks,\nRaj"],
+};
+document.querySelectorAll('[data-sample]').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault(); const [ws, text] = SAMPLES[a.dataset.sample];
+  wsSel.value = ws; showKb(); document.getElementById('doctext').value = text;
+}));
+
+const LABEL = {contradict:'🦖 Hallucination', agree:'✅ Checks out', no_source:'🟡 No source — add a citation', not_claim:'· not a factual claim'};
+async function checkDoc(){
+  const text = document.getElementById('doctext').value.trim(); if(!text) return;
+  const sum = document.getElementById('docsum'), res = document.getElementById('docres'), btn = document.getElementById('docgo');
+  btn.disabled = true; btn.textContent = '🦖 Checking…'; sum.innerHTML = ''; res.innerHTML = '';
+  try{
+    const r = await fetch(API + '/api/check', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, ws: wsSel.value})}).then(r => r.json());
+    if(r.error) throw new Error(r.error);
+    const c = r.counts || {};
+    sum.innerHTML = `<span class="chip r">🦖 ${c.contradict||0} hallucination${(c.contradict||0)==1?'':'s'}</span>
+      <span class="chip g">✅ ${c.agree||0} checked out</span><span class="chip y">🟡 ${c.no_source||0} no source</span>
+      <span class="sumtxt">${r.sentences} sentences · ${r.drex_calls} Drex decisions · ${(r.total_ms/1000).toFixed(1)} s</span>`;
+    const order = {contradict:0, no_source:1, agree:2, not_claim:3};
+    r.results.map((x,i)=>({...x,i})).sort((a,b)=>order[a.status]-order[b.status] || a.i-b.i).forEach(x => {
+      const el = document.createElement('div'); el.className = 'claim ' + x.status;
+      const d = x.doc;
+      el.innerHTML = `<div class="st">${LABEL[x.status]}${x.conf?` <span class="meta">${Math.round(x.conf*100)}% sure</span>`:''}</div>
+        <div class="s">${esc(x.sentence)}</div>
+        ${d ? `<details ${x.status==='contradict'?'open':''}><summary>${x.status==='contradict'?'Source actually says':'Source'}: ${esc(d.title)}</summary>
+          <div class="text">${highlight(d.text.slice(0,420)+(d.text.length>420?'…':''), x.sentence)}</div>
+          ${d.url && d.url.startsWith('http') ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source)} ↗</a>` : `<span class="sumtxt">${esc(d.source)}</span>`}</details>` : ''}`;
+      res.appendChild(el);
+    });
+    S.dec += r.drex_calls; updStats();
+  }catch(e){ sum.innerHTML = `<span class="chip r">⚠️ ${esc(e.message)}</span>`; }
+  btn.disabled = false; btn.textContent = '🦖 Check every claim';
+}
+document.getElementById('docgo').addEventListener('click', checkDoc);
+
+// PDF / text files (e.g. exported from Adobe Express or Acrobat)
+async function loadPdfJs(){
+  if (window.pdfjsLib) return window.pdfjsLib;
+  await new Promise((ok, bad) => { const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; s.onload = ok; s.onerror = bad; document.head.appendChild(s); });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  return window.pdfjsLib;
+}
+async function readFile(f){
+  const ta = document.getElementById('doctext');
+  if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf'){
+    ta.value = 'Reading ' + f.name + '…';
+    try{
+      const lib = await loadPdfJs(); const pdf = await lib.getDocument({data: await f.arrayBuffer()}).promise; let out = [];
+      for (let p = 1; p <= Math.min(pdf.numPages, 30); p++){
+        const tc = await (await pdf.getPage(p)).getTextContent(); let line = '', lastY = null;
+        for (const it of tc.items){ const y = it.transform[5]; if (lastY !== null && Math.abs(y - lastY) > 4){ out.push(line); line=''; } line += it.str + (it.hasEOL ? '\n' : ''); lastY = y; }
+        out.push(line);
+      }
+      ta.value = out.map(s => s.trim()).filter(Boolean).join('\n') || '(No text found: is this PDF just an image? Export it from Adobe Express with text, or use NDI.)';
+    }catch(e){ ta.value = 'Could not read PDF: ' + e.message; }
+  } else { ta.value = await f.text(); }
+}
+document.getElementById('file').addEventListener('change', e => e.target.files[0] && readFile(e.target.files[0]));
+const drop = document.getElementById('drop');
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) readFile(f); });
 
 // ---- page mode: Chrome extension posts the current tab's text here
 window.addEventListener('message',e=>{if(e.data&&e.data.type==='hallucinot-page'&&e.data.text) analyze(e.data.text,'page');});

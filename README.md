@@ -26,6 +26,17 @@ python3 server.py --folder ~/path/to/docs --repo owner/name
 
 Without flags, the server loads `kb/company/` (fictional "Quokka Analytics" docs) plus the `pallets/flask` PRs.
 
+## Check a document (any text, claim by claim)
+
+Open the **📄 Check a document** tab. Paste text or drop a PDF (for example one exported from **Adobe Express** or Acrobat), then click **Check every claim**. Each sentence gets one of:
+- 🦖 **Hallucination**, with what the source actually says
+- ✅ **Checks out**
+- 🟡 **No source**, meaning add a citation
+
+The built-in samples are a 🤖 chatbot answer, a 🎓 student poster and a ✉️ customer email. Sentences are checked in parallel, so a whole document takes about 1 second.
+
+**Workspaces:** switch the knowledge base between 🏢 **Company** (`kb/company` + GitHub PRs) and 🎓 **Classroom** (`kb/classroom`, demo Bio 101 notes). Add your own with `--folder name=PATH`.
+
 ## Chrome extension (any-tab mode)
 
 1. Start the server (above).
