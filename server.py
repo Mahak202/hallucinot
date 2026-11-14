@@ -918,6 +918,56 @@ def parse_submissions(raw):
     return [x for x in out if x["team"] or x["project"]]
 
 
+def table_to_rows(md):
+    """Markdown tables (from NDI parsing Excel/PDF/Word) -> list of dicts."""
+    lines = [l.strip() for l in md.splitlines() if l.strip().startswith("|")]
+    if len(lines) < 2:
+        return []
+    cells = lambda l: [c.strip() for c in l.strip("|").split("|")]
+    head = cells(lines[0])
+    rows = []
+    for l in lines[1:]:
+        if re.match(r"^\|?\s*:?-{2,}", l):
+            continue
+        c = cells(l)
+        if len(c) >= 2:
+            rows.append(dict(zip(head, c)))
+    return rows
+
+
+def llm_extract_teams(text):
+    """System 2 fallback: pull team records out of any messy text."""
+    out, _, _ = llm("Extract every hackathon team or submission from the text below. Reply with ONLY a JSON list of objects "
+                    "with keys: team, project, explanation, repo, slides, demo (empty string if unknown). No commentary.\n\n"
+                    + text[:12000], max_tokens=3000)
+    m = re.search(r"\[.*\]", out, re.S)
+    return json.loads(m.group(0)) if m else []
+
+
+def ingest_any(data, name):
+    """Whatever Nace gives us (CSV, JSON, Excel, PDF, Word, image, text) -> list of submissions + how we read it."""
+    low = name.lower()
+    text, how = None, ""
+    if low.endswith((".csv", ".json", ".txt", ".tsv", ".md")):
+        text, how = data.decode("utf-8", errors="ignore"), "read directly"
+        try:
+            subs = parse_submissions(text.replace("\t", ",") if low.endswith(".tsv") else text)
+            if subs:
+                return subs, how
+        except Exception:
+            pass
+    if text is None:
+        text, how = ndi_parse(data, name)["text"], "read by NDI"
+    rows = table_to_rows(text)
+    if rows:
+        subs = parse_submissions(json.dumps(rows))
+        if subs:
+            return subs, how + " (table)"
+    subs = [x for x in (llm_extract_teams(text) or []) if isinstance(x, dict)]
+    subs = parse_submissions(json.dumps(subs)) if subs else []
+    return subs, how + " + teams extracted by DeepInfra LLM"
+
+
 def import_submission(sub):
     name = sub["team"] or sub["project"]
     clean = re.sub(r"[*_`#>]+", "", sub["explanation"])
@@ -1110,6 +1160,27 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?")[0]
+        if route == "/api/judge/ingest":  # any file Nace gives us -> teams
+            size = int(self.headers.get("Content-Length", 0))
+            if size > 25 * 1024 * 1024:
+                return self._send(413, {"error": "File too large (25 MB max)"})
+            from urllib.parse import parse_qs, urlparse
+            name = re.sub(r"[^\w.\- ]", "_", os.path.basename((parse_qs(urlparse(self.path).query).get("name") or ["upload"])[0]))[:120]
+            data = self.rfile.read(size)
+            try:
+                subs, how = ingest_any(data, name)
+            except Exception as e:
+                return self._send(502, {"error": f"Could not read {name}: {e}"})
+            if not subs:
+                return self._send(400, {"error": f"Read {name} ({how}) but found no teams in it"})
+            done, errors = [], []
+            with concurrent.futures.ThreadPoolExecutor(4) as ex:
+                for sub, fut in [(x, ex.submit(import_submission, x)) for x in subs]:
+                    try:
+                        done.append(fut.result())
+                    except Exception as e:
+                        errors.append(f"{sub.get('team') or sub.get('project')}: {e}")
+            return self._send(200, {"how": how, "imported": done, "errors": errors, "teams": JUDGE["teams"]})
         if route == "/api/parse":  # raw file bytes -> NDI -> text
             size = int(self.headers.get("Content-Length", 0))
             if size > 25 * 1024 * 1024:
