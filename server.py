@@ -335,7 +335,7 @@ def check_sentence(sentence, ws):
     a = r1["answers"]; res["drex_ms"].append(r1["_ms"])
     if a["claim"]["noul"] < 0.5:
         return res
-    if a["doc"]["choice"] == "none" or a["doc"].get("confidence", 0) < 0.4:
+    if a["doc"]["choice"] == "none" or a["doc"].get("confidence", 0) < 0.25:
         res["status"] = "no_source"
         return res
     # a sentence can make several claims that live in different docs: check the top 2 picks
@@ -802,6 +802,119 @@ def post_slack(text):
     urllib.request.urlopen(req, timeout=20).read()
 
 
+# ---------------------------------------------------------------- judge mode
+# Load each team's public GitHub repo as its own knowledge section, detect which team is presenting
+# from what they say (a Drex decision), and check every claim against that team's own materials.
+JUDGE = {"teams": [], "current": None, "scores": {}}
+
+
+def gh_get(path):
+    """GitHub API via the gh CLI (authenticated, higher rate limit); falls back to anonymous HTTPS."""
+    try:
+        out = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
+        if out.returncode == 0:
+            return json.loads(out.stdout)
+    except Exception:
+        pass
+    req = urllib.request.Request("https://api.github.com/" + path.lstrip("/"), headers={"User-Agent": "hallucinot"})
+    return json.load(urllib.request.urlopen(req, timeout=30))
+
+
+def import_team(name, repo_url):
+    m = re.search(r"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", repo_url.strip())
+    if not m:
+        raise ValueError(f"not a GitHub repo link: {repo_url}")
+    owner, repo = m.group(1), m.group(2)
+    slug = "team:" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    info = gh_get(f"repos/{owner}/{repo}")
+    import base64
+    texts = []
+    try:
+        rd = gh_get(f"repos/{owner}/{repo}/readme")
+        texts.append(("README.md", base64.b64decode(rd["content"]).decode(errors="ignore")))
+    except Exception:
+        pass
+    try:  # a few extra top-level docs (pitch, submission, docs)
+        for f in gh_get(f"repos/{owner}/{repo}/contents")[:60]:
+            if f["type"] == "file" and f["name"].lower().endswith((".md", ".txt")) and f["name"].lower() != "readme.md" and len(texts) < 5:
+                c = gh_get(f"repos/{owner}/{repo}/contents/{f['path']}")
+                texts.append((f["name"], base64.b64decode(c["content"]).decode(errors="ignore")))
+    except Exception:
+        pass
+    with LOCK:
+        CHUNKS[:] = [c for c in CHUNKS if c["ws"] != slug]
+        n = 0
+        for fname, t in texts:
+            n += add_document(t[:60000], f"{repo}/{fname}", slug)
+        if info.get("description"):
+            LOADING_WS[0] = slug; add_chunk(f"{repo} (GitHub)", f"{repo}: repo description", info["description"], kind="file"); LOADING_WS[0] = "company"
+        build_index()
+    first = re.sub(r"[#*`>\[\]]", "", next((t for _, t in texts), "")).strip()
+    oneliner = (info.get("description") or " ".join(first.split()[:30]))[:200]
+    team = {"name": name.strip(), "slug": slug, "repo": f"https://github.com/{owner}/{repo}", "oneliner": oneliner, "sections": n}
+    JUDGE["teams"] = [t for t in JUDGE["teams"] if t["slug"] != slug] + [team]
+    JUDGE["scores"].setdefault(slug, {"claims": 0, "agree": 0, "contradict": 0, "no_source": 0, "items": []})
+    return team
+
+
+def register_team(name, oneliner="", repo=""):
+    """Self-registration: a team gives its name, a one-liner and optionally a GitHub repo; files can be added later."""
+    name = name.strip()[:60]
+    if not name:
+        raise ValueError("Team name is required")
+    if repo.strip():
+        team = import_team(name, repo)
+        if oneliner.strip():
+            team["oneliner"] = oneliner.strip()[:200]
+        return team
+    slug = "team:" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    team = {"name": name, "slug": slug, "repo": "", "oneliner": oneliner.strip()[:200], "sections": 0}
+    if oneliner.strip():
+        with LOCK:
+            LOADING_WS[0] = slug; add_chunk(name, f"{name}: project summary", oneliner, kind="file"); LOADING_WS[0] = "company"
+            build_index()
+    JUDGE["teams"] = [t for t in JUDGE["teams"] if t["slug"] != slug] + [team]
+    JUDGE["scores"].setdefault(slug, {"claims": 0, "agree": 0, "contradict": 0, "no_source": 0, "items": []})
+    return team
+
+
+def judge_analyze(text, override=None):
+    t0 = time.time()
+    text = re.sub(r"^[A-Z][a-z]{1,15}:\s*", "", text.strip())
+    teams = JUDGE["teams"]
+    if not teams:
+        raise RuntimeError("Import the teams first")
+    out = {"text": text, "switched": False}
+    if override:
+        if override != JUDGE["current"]:
+            out["switched"] = True
+        JUDGE["current"] = override
+    else:
+        crit = {t["slug"]: f"{t['name']}: {t['oneliner']}" for t in teams}
+        crit["unclear"] = "Cannot tell which project this is about, or it is general talk"
+        r = drex({"presenter_just_said": text, "current_team": JUDGE["current"] or "none yet"},
+                 {"team": {"type": "choice", "criteria": crit, "instructions":
+                           "A hackathon team is presenting its project on stage. Which team's project is this sentence about? "
+                           "Use the project names, features and descriptions. Pick unclear if it could be any of them."}})
+        a = r["answers"]["team"]
+        out["team_guess"], out["team_conf"] = a["choice"], round(a.get("confidence", 0), 2)
+        if a["choice"] != "unclear" and a.get("confidence", 0) >= 0.6 and a["choice"] != JUDGE["current"]:
+            JUDGE["current"] = a["choice"]; out["switched"] = True
+    cur = JUDGE["current"]
+    out["team"] = cur
+    if not cur:
+        out["total_ms"] = round((time.time() - t0) * 1000)
+        return out
+    res = check_sentence(text, cur)
+    out["check"] = res
+    sc = JUDGE["scores"].setdefault(cur, {"claims": 0, "agree": 0, "contradict": 0, "no_source": 0, "items": []})
+    if res["status"] in ("agree", "contradict", "no_source"):
+        sc["claims"] += 1; sc[res["status"]] += 1
+        sc["items"].append({"text": text, "status": res["status"], "source": (res.get("doc") or {}).get("title"), "t": time.strftime("%H:%M")})
+    out["total_ms"] = round((time.time() - t0) * 1000)
+    return out
+
+
 # ---------------------------------------------------------------- replay insurance
 REPLAY_FILE = os.path.join(DATA, "replay.json")
 REPLAY = json.load(open(REPLAY_FILE)) if os.path.exists(REPLAY_FILE) else {}
@@ -844,6 +957,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/agents"):
             return self._send(200, agents_view())
+        if self.path.startswith("/api/judge"):
+            return self._send(200, {"teams": JUDGE["teams"], "current": JUDGE["current"], "scores": JUDGE["scores"]})
         if self.path.startswith("/api/llmstats"):
             return self._send(200, LLM_STATS)
         if self.path.startswith("/api/integrations"):
@@ -882,9 +997,37 @@ class H(BaseHTTPRequestHandler):
             STATS["ndi_pages"] += res.get("pages") or 1
             return self._send(200, res)
         if route not in ("/api/analyze", "/api/check", "/api/agents", "/api/agents/delete", "/api/reset", "/api/kb/add",
-                         "/api/recap", "/api/slack", "/api/slack/connect"):
+                         "/api/recap", "/api/slack", "/api/slack/connect", "/api/judge/teams", "/api/judge/analyze", "/api/judge/reset", "/api/judge/register"):
             return self._send(404, {"error": "not found"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        if route == "/api/judge/teams":
+            added, errors = [], []
+            for line in (body.get("lines") or "").splitlines():
+                if not line.strip():
+                    continue
+                parts = [x.strip() for x in re.split(r"[,\t|]", line, maxsplit=1)]
+                name, url = (parts + [""])[:2] if len(parts) > 1 else (re.sub(r".*github\.com/[\w.-]+/", "", parts[0]), parts[0])
+                try:
+                    added.append(import_team(name or url, url))
+                except Exception as e:
+                    errors.append(f"{line.strip()[:60]}: {e}")
+            return self._send(200, {"added": added, "errors": errors, "teams": JUDGE["teams"]})
+        if route == "/api/judge/register":
+            try:
+                t = register_team(body.get("name", ""), body.get("oneliner", ""), body.get("repo", ""))
+                return self._send(200, {"team": t, "teams": JUDGE["teams"]})
+            except Exception as e:
+                return self._send(400, {"error": str(e)})
+        if route == "/api/judge/analyze":
+            try:
+                return self._send(200, judge_analyze(body.get("text", ""), body.get("team") or None))
+            except Exception as e:
+                return self._send(503, {"error": str(e)})
+        if route == "/api/judge/reset":
+            JUDGE["current"] = None
+            for v in JUDGE["scores"].values():
+                v.update(claims=0, agree=0, contradict=0, no_source=0, items=[])
+            return self._send(200, {"ok": True})
         if route == "/api/recap":
             return self._send(200, write_recap())
         if route == "/api/slack/connect":
@@ -907,6 +1050,8 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 before = sum(1 for a in AGENTS if a["source"] == "docs")
                 n = add_document(text, name, ws); build_index(); load_agents()
+                for t in JUDGE["teams"]:
+                    if t["slug"] == ws: t["sections"] = t.get("sections", 0) + n
                 new_rules = [a for a in AGENTS if a["source"] == "docs" and a.get("doc") == name]
             return self._send(200, {"chunks_added": n, "ws": ws, "new_agents": [a["rule"] for a in new_rules],
                                     "workspaces": {w: len(I["chunks"]) for w, I in INDEXES.items()}})
