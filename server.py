@@ -1248,6 +1248,53 @@ def judge_analyze(text, override=None):
     return out
 
 
+# ---------------------------------------------------------------- game: "Catch the facts", judged by Drex
+import random as _random
+
+
+def _mutate_number(sent):
+    """Make a plausible wrong version of a fact by changing one number."""
+    nums = list(re.finditer(r"\d+(?:[.,]\d+)?", sent))
+    nums = [m for m in nums if not re.fullmatch(r"(19|20)\d\d", m.group(0))] or nums
+    if not nums:
+        return None
+    m = _random.choice(nums)
+    v = m.group(0)
+    if "." in v:
+        new = v + "9" if len(v.split(".")[1]) < 3 else v[:-1]
+    else:
+        n = int(v.replace(",", ""))
+        new = str(_random.choice([n * 3, n + 7, max(1, n // 2), n * 10])) if n else "5"
+    return sent[:m.start()] + new + sent[m.end():] if new != v else None
+
+
+def game_round(n=12):
+    """Real sentences from the knowledge base plus altered copies; Drex decides which are true."""
+    pool = []
+    for c in CHUNKS:
+        if c["kind"] == "file" and c["ws"] in ("company", "classroom"):
+            for sent in source_sentences(c["text"]):
+                if re.search(r"\d", sent) and 30 < len(sent) < 150:
+                    pool.append((sent, c))
+    _random.shuffle(pool)
+    items = []
+    for sent, c in pool[: n]:
+        if _random.random() < 0.5:
+            bad = _mutate_number(sent)
+            if bad:
+                items.append({"text": bad, "doc": c, "made": "altered", "orig": sent}); continue
+        items.append({"text": sent, "doc": c, "made": "original", "orig": sent})
+    def judge(it):
+        r = drex({"statement": it["text"], "source": f"{it['doc']['title']}: {it['doc']['text']}"}, {"v": VERDICT})
+        v = r["answers"]["v"]
+        return {"text": it["text"], "true": v["choice"] == "agree", "verdict": v["choice"], "conf": round(v.get("confidence", 0), 2),
+                "ms": r["_ms"], "source": citation(it["doc"]), "source_line": it["orig"], "made": it["made"]}
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        out = [x for x in ex.map(judge, items) if x["verdict"] != "unclear"]
+    right = sum(1 for x in out if x["true"] == (x["made"] == "original"))
+    return {"items": out, "drex_agrees_with_answer_key": f"{right}/{len(out)}"}
+
+
 # ---------------------------------------------------------------- replay insurance
 REPLAY_FILE = os.path.join(DATA, "replay.json")
 REPLAY = json.load(open(REPLAY_FILE)) if os.path.exists(REPLAY_FILE) else {}
@@ -1298,6 +1345,11 @@ class H(BaseHTTPRequestHandler):
                                     "ranking": JUDGE["ranking"], "phase": phase,
                                     "rubric": [{"key": k, "label": l, "question": q} for k, l, q in RUBRIC],
                                     "know": {t["slug"]: g for t in JUDGE["teams"] for g in [know_view().get(t["slug"], [])]}})
+        if self.path.startswith("/api/game/round"):
+            try:
+                return self._send(200, game_round())
+            except Exception as e:
+                return self._send(503, {"error": str(e)})
         if self.path.startswith("/api/llmstats"):
             return self._send(200, LLM_STATS)
         if self.path.startswith("/api/integrations"):
