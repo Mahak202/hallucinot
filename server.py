@@ -566,6 +566,7 @@ def normalize_spoken(t):
     t = re.sub(r"\b(" + "|".join(k for k in NUMW if k != "oh") + r")\s+percent\b", lambda m: NUMW[m.group(1).lower()] + "%", t, flags=re.I)
     t = re.sub(r"(\d)\s+percent\b", r"\1%", t)
     t = fix_glossary(t)
+    t = re.sub(r"\b(?:[a-zA-Z]\.?\s){1,}[a-zA-Z]\b\.?", lambda m: re.sub(r"[\s.]", "", m.group(0)).upper() if len(re.sub(r"[\s.]", "", m.group(0))) >= 2 else m.group(0), t)  # "h t t p x" -> HTTPX
     return re.sub(r"\s{2,}", " ", t).strip()
 
 
@@ -581,6 +582,55 @@ def fix_glossary(t):
     t = re.sub(r"\b" + SOUNDALIKE + r"\s+(?=" + MODEL_AFTER + r"\b)", "Drex ", t, flags=re.I)
     t = re.sub(r"\bnice\s+(?:dot\s+)?a\.?\s?i\b", "Nace AI", t, flags=re.I)
     return t
+
+
+EVENT_TERMS = ["Drex", "Nace", "NDI", "Intern", "DeepInfra", "Adobe", "Firefly", "Keenable", "Perception", "Drexathon"]
+_DICT = None
+
+
+def english(w):
+    """Is this an ordinary English word (or a simple inflection of one)?"""
+    global _DICT
+    if _DICT is None:
+        try:
+            _DICT = set(x.strip().lower() for x in open("/usr/share/dict/words", errors="ignore"))
+        except Exception:
+            _DICT = set()
+    w = w.lower()
+    if w in _DICT:
+        return True
+    for suf in ("s", "es", "ed", "d", "ing", "er", "ers", "ly"):
+        if w.endswith(suf) and w[: -len(suf)] in _DICT:
+            return True
+    return False
+
+
+def vocab_for(ws):
+    """Important words for a workspace, built automatically: names, product terms, jargon from its own materials."""
+    I = INDEXES.get(ws)
+    terms = set(EVENT_TERMS)
+    for t in JUDGE["teams"]:
+        terms.update(re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", t["name"] + " " + (t.get("oneliner") or "").split(":")[0]))
+    if I:
+        caps = collections.Counter()
+        for c in I["chunks"][:500]:
+            caps.update(re.findall(r"\b(?:[A-Z][a-z]*[A-Z0-9][A-Za-z0-9]*|[A-Z][a-z]{2,}|[A-Z]{2,6})\b", c["title"] + " " + c["text"]))
+        terms.update(w for w, k in caps.items() if k >= 2 and not english(w))
+    return sorted(terms)
+
+
+def fix_terms(text, ws):
+    """Snap misheard made-up words ("hallucinote") to the closest important term; real English words are left alone."""
+    import difflib
+    vocab = vocab_for(ws)
+    low = {v.lower(): v for v in vocab}
+    def fix(m):
+        w = m.group(0)
+        if len(w) < 4 or w.lower() in low or english(w):
+            return w
+        hit = difflib.get_close_matches(w.lower(), list(low), n=1, cutoff=0.8)
+        return low[hit[0]] if hit else w
+    return re.sub(r"[A-Za-z][A-Za-z0-9]+", fix, text)
 
 
 def pick_transcript(alternatives, ws):
@@ -604,7 +654,7 @@ def analyze_live(text, previous="", ws="company", llm_mode="drex", alternatives=
     heard = text
     if alternatives:
         text = pick_transcript([text] + [a for a in alternatives if a and a != text], ws)
-    text = normalize_spoken(text)
+    text = fix_terms(normalize_spoken(text), ws)
     out = {"mode": "speech", "text": text[:300], "speaker": speaker, "show": False, "agents": [], "drex_ms": []}
     if text.lower() != heard.lower():
         out["heard"] = heard[:300]
@@ -1138,6 +1188,7 @@ def rank_teams():
 def judge_analyze(text, override=None):
     t0 = time.time()
     text = normalize_spoken(re.sub(r"^[A-Z][a-z]{1,15}:\s*", "", text.strip()))
+    text = fix_terms(text, JUDGE["current"] or "")
     teams = JUDGE["teams"]
     if not teams:
         raise RuntimeError("Import the teams first")
