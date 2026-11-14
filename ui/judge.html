@@ -418,5 +418,6 @@ if (VIEW === 'board') { renderBoard(); setInterval(renderBoard, 3000); }
 if (VIEW === 'team') { renderTeam(); setInterval(renderTeam, 4000); }
 window.addEventListener('hashchange', () => { if (!/^#s\d$/.test(location.hash)) location.reload(); });
 </script>
+<script src="/offline.js"></script>
 </body>
 </html>
